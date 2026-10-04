@@ -357,6 +357,37 @@ $("#save").onclick = async () => {
   }
 };
 
+// ---------------------------------------------------------------- curve presets
+const CURVES = {
+  quiet: [[35, 12], [45, 15], [55, 22], [62, 35], [68, 55]],
+  balanced: [[30, 15], [45, 20], [55, 30], [65, 50], [72, 75]],
+  cool: [[30, 20], [45, 30], [55, 45], [65, 70], [70, 90]],
+  storage: [[30, 25], [45, 30], [55, 40], [65, 60], [72, 85]],
+};
+$$("[data-curve]").forEach(b => b.onclick = () => {
+  draft.curve = CURVES[b.dataset.curve].map(p => [...p]);
+  draft.mode = "curve";
+  touch();
+  toast(`${b.textContent} curve loaded. Apply to use it`);
+});
+$("#curve-copy").addEventListener("focus", () => {
+  const others = (overview?.servers || []).filter(x => x.id !== server?.id && x.control);
+  $("#curve-copy").innerHTML = '<option value="">Copy from…</option>' +
+    others.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("");
+});
+$("#curve-copy").onchange = async e => {
+  const id = e.target.value;
+  e.target.value = "";
+  if (!id) return;
+  const r = await api("/api/state?server=" + encodeURIComponent(id));
+  if (!r.ok) return toast("Could not read that server", true);
+  const other = await r.json();
+  draft.curve = other.settings.curve.map(p => [...p]);
+  draft.mode = "curve";
+  touch();
+  toast(`Curve copied from ${other.name}. Apply to use it`);
+};
+
 // ---------------------------------------------------------------- curve editor
 const CW = 400, CH = 230, P = { l: 34, r: 10, t: 12, b: 26 };
 const cx = t => P.l + (t - T_MIN) / (T_MAX - T_MIN) * (CW - P.l - P.r);

@@ -539,3 +539,7 @@ a.btn.primary { color: var(--bg); }
 .quiet-fields input[type=time] { padding: 4px 6px; border: 1px solid var(--rule-2); border-radius: 5px; background: var(--surface); color: var(--ink); font: 13px var(--sans); }
 .quiet-fields .num input { width: 54px; }
 .quiet-row { flex-wrap: wrap; }
+
+.curve-presets { align-items: center; margin: -4px 0 12px; }
+.curve-presets .muted { font-size: 12.5px; margin-right: 2px; }
+.curve-presets select { padding: 3px 6px; border: 1px solid var(--rule-2); border-radius: 5px; background: transparent; color: var(--ink-2); font: 12.5px var(--sans); }

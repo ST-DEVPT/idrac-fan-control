@@ -127,6 +127,14 @@
       </div>
       <div class="panel" data-panel="curve">
         <p class="help">Drag the points. Double-click empty space to add a point, or a point to remove it.</p>
+        <div class="presets curve-presets">
+          <span class="muted">Start from</span>
+          <button data-curve="quiet" title="Homelab, Xeon E5 class CPUs">Quiet</button>
+          <button data-curve="balanced">Balanced</button>
+          <button data-curve="cool">Cool</button>
+          <button data-curve="storage" title="Many disks or HBAs, which the CPU temperature doesn't show">Storage</button>
+          <select id="curve-copy" aria-label="Copy the curve of another server"><option value="">Copy from…</option></select>
+        </div>
         <div class="curve-box" id="curve-box">
           <svg id="curve" viewBox="0 0 400 230"></svg>
           <div class="curve-tip" id="curve-tip"></div>
