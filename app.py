@@ -1,11 +1,6 @@
-"""Web dashboard and fan controller for Dell PowerEdge servers, driven through iDRAC IPMI.
-
-Uses Dell's OEM raw IPMI commands:
-  0x30 0x30 0x01 0x01        Dell dynamic fan control (default)
-  0x30 0x30 0x01 0x00        manual fan control
-  0x30 0x30 0x02 0xff <hex>  all fans to <hex> percent (0x00.. per fan on some 11th-gen servers)
-  0x30 0xce ...              third-party PCIe card default cooling response
-Works on iDRAC 6/7/8 and on iDRAC 9 up to firmware 3.30.30.30.
+"""Web dashboard and fan controller for rack servers: Dell iDRAC, Supermicro, HPE iLO and any
+Redfish or IPMI BMC. The hardware side lives in drivers.py; this file is the control loop,
+alerts, metrics and the HTTP server.
 """
 
 import hashlib
@@ -28,6 +23,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from drivers import DRIVERS, HOST_RE, DemoDriver, DriverError, RedfishDriver, parse_redfish, parse_sdr  # noqa: F401
+
 sys.stdout.reconfigure(errors="replace")  # Windows consoles choke on ° and →
 
 VERSION = os.environ.get("APP_VERSION", "dev")
@@ -45,70 +42,13 @@ SAVE_EVERY = 300           # seconds between history snapshots to disk
 FAILSAFE_HYSTERESIS = 3    # °C the CPU must drop below the failsafe before manual control resumes
 
 DEFAULT_SETTINGS = {
-    "mode": "curve",  # dell | fixed | curve
+    "mode": "curve",  # auto | fixed | curve
     "fixed_speed": 20,
     "curve": [[30, 10], [45, 15], [55, 25], [65, 45], [72, 70]],
-    "failsafe_temp": 75,       # at or above this CPU temp, hand control back to Dell
+    "failsafe_temp": 75,       # at or above this CPU temp, hand control back to the BMC
     "ramp_down_seconds": 60,   # fans speed up at once, slow down only after this long
     "pcie_cooling": None,      # None = leave untouched, True/False = enforce
 }
-
-# ipmitool completion codes worth explaining instead of just echoing
-HINTS = {
-    "rsp=0xc1": "the iDRAC does not have this command; iDRAC 9 firmware 3.34.34.34 and later removed manual fan control",
-    "rsp=0xd4": "insufficient privilege; the iDRAC user must be an Administrator",
-    "rsp=0xcc": "the iDRAC rejected the fan selector",
-}
-
-
-class IPMIError(Exception):
-    pass
-
-
-def is_refusal(error):
-    """The BMC answered and rejected this particular fan identifier or value."""
-    return any(code in str(error) for code in ("rsp=0xcc", "rsp=0xc9"))
-
-
-# ---------------------------------------------------------------- pure logic
-
-def parse_sdr(text):
-    """Parse `ipmitool sdr elist full` into temperatures, fans and power.
-
-    Line shape: 'Inlet Temp | 04h | ok | 7.1 | 23 degrees C'. Entity 3.x is a processor.
-    Sensor names differ between generations ("Inlet Temp" vs "Ambient Temp", "Fan1A RPM"
-    vs "FAN MOD 1A RPM"), so inlet/exhaust are matched by name pattern.
-    """
-    temps, fans, watts = [], [], None
-    for line in text.splitlines():
-        parts = [p.strip() for p in line.split("|")]
-        if len(parts) != 5:
-            continue
-        name, _, status, entity, reading = parts
-        value, _, unit = reading.partition(" ")
-        try:
-            value = float(value)
-        except ValueError:
-            continue  # "No Reading", "Disabled", discrete sensors
-        if unit == "degrees C":
-            temps.append({"name": name, "entity": entity, "value": value,
-                          "cpu": entity.startswith("3."), "ok": status == "ok"})
-        elif unit == "RPM":
-            fans.append({"name": re.sub(r"\s*RPM$", "", name), "rpm": int(value), "ok": status == "ok"})
-        elif unit == "Watts" and watts is None:
-            watts = value
-    # Dell labels every CPU sensor plain "Temp"; number them so they can be told apart
-    cpus = [t for t in temps if t["cpu"]]
-    if len(cpus) > 1 or (cpus and cpus[0]["name"] == "Temp"):
-        for i, t in enumerate(cpus, 1):
-            t["name"] = f"CPU {i}"
-
-    def find(pattern):
-        return next((t["value"] for t in temps if not t["cpu"] and re.search(pattern, t["name"], re.I)), None)
-
-    return {"temps": temps, "fans": fans, "watts": watts,
-            "inlet": find(r"inlet|ambient"), "exhaust": find(r"exhaust")}
-
 
 def curve_speed(curve, temp):
     """Linear interpolation over [[temp, speed], ...]; flat beyond both ends."""
@@ -127,15 +67,15 @@ def decide(settings, cpu_temp, was_failsafe=False):
     Once the failsafe trips, manual control resumes only when the CPU is
     FAILSAFE_HYSTERESIS degrees below the limit, so the fans don't flap at the edge.
     """
-    if settings["mode"] == "dell":
-        return "dell", None, "Dell mode selected", False
+    if settings["mode"] == "auto":
+        return "auto", None, "automatic mode selected", False
     if cpu_temp is None:
-        return "dell", None, "no CPU temperature reading", False
+        return "auto", None, "no CPU temperature reading", False
     limit = settings["failsafe_temp"]
     if cpu_temp >= limit:
-        return "dell", None, f"CPU {cpu_temp:.0f}°C ≥ failsafe {limit}°C", True
+        return "auto", None, f"CPU {cpu_temp:.0f}°C ≥ failsafe {limit}°C", True
     if was_failsafe and cpu_temp > limit - FAILSAFE_HYSTERESIS:
-        return "dell", None, f"CPU {cpu_temp:.0f}°C, resuming below {limit - FAILSAFE_HYSTERESIS}°C", True
+        return "auto", None, f"CPU {cpu_temp:.0f}°C, resuming below {limit - FAILSAFE_HYSTERESIS}°C", True
     if settings["mode"] == "fixed":
         return "manual", settings["fixed_speed"], "fixed speed", False
     return "manual", curve_speed(settings["curve"], cpu_temp), f"curve at {cpu_temp:.0f}°C", False
@@ -152,8 +92,10 @@ def ramped(window, now, target, hold):
 
 def validate_settings(new, current):
     s = {**current, **{k: v for k, v in new.items() if k in DEFAULT_SETTINGS}}
-    if s["mode"] not in ("dell", "fixed", "curve"):
-        raise ValueError("mode must be dell, fixed or curve")
+    if s["mode"] == "dell":
+        s["mode"] = "auto"
+    if s["mode"] not in ("auto", "fixed", "curve"):
+        raise ValueError("mode must be auto, fixed or curve")
     if not (type(s["fixed_speed"]) is int and 0 <= s["fixed_speed"] <= 100):
         raise ValueError("fixed speed must be a whole number from 0 to 100")
     if not (type(s["failsafe_temp"]) in (int, float) and 40 <= s["failsafe_temp"] <= 100):
@@ -186,13 +128,13 @@ LEVELS = ("error", "warn", "ok", "info")
 
 # kind: (level, default title, default message). {placeholders} are filled per alert.
 ALERT_KINDS = {
-    "failsafe":         ("warn",  "{server}: failsafe",            "CPU at {cpu}°C reached the {failsafe}°C failsafe. The iDRAC took over the fans."),
+    "failsafe":         ("warn",  "{server}: failsafe",            "CPU at {cpu}°C reached the {failsafe}°C failsafe. The BMC took over the fans."),
     "failsafe_cleared": ("ok",    "{server}: failsafe cleared",    "CPU back to {cpu}°C. Manual fan control resumed."),
     "hot":              ("warn",  "{server}: running hot",         "CPU at {cpu}°C, above the {threshold}°C warning. Fans at {speed}."),
-    "unreachable":      ("error", "{server}: iDRAC unreachable",   "{error}"),
-    "refused":          ("error", "{server}: fan command refused", "{error}\nThe iDRAC keeps control of the fans."),
-    "recovered":        ("ok",    "{server}: back to normal",      "The iDRAC is answering and accepting fan commands again."),
-    "controller_error": ("error", "{server}: controller error",    "{error}\nFans handed back to the iDRAC."),
+    "unreachable":      ("error", "{server}: BMC unreachable",     "{error}"),
+    "refused":          ("error", "{server}: fan command refused", "{error}\nThe BMC keeps control of the fans."),
+    "recovered":        ("ok",    "{server}: back to normal",      "The BMC is answering and accepting fan commands again."),
+    "controller_error": ("error", "{server}: controller error",    "{error}\nFans handed back to the BMC."),
     "settings_changed": ("info",  "{server}: settings changed",    "Mode {mode}, failsafe {failsafe}°C."),
     "started":          ("info",  "{server}: controller started",  "Watching {host} every {interval} s."),
     "report":           ("info",  "{server}: status",              "{model} · last {period}"),
@@ -208,9 +150,9 @@ SAMPLE = {"server": "Rack A", "host": "192.168.1.120", "model": "PowerEdge R730"
 ALERT_DEFAULTS = {
     "enabled": True,
     "webhook_url": "",       # empty: fall back to the DISCORD_WEBHOOK_URL environment variable
-    "username": "iDRAC Fan Control",
+    "username": "Fan Control",
     "avatar_url": "",
-    "footer": "iDRAC Fan Control",
+    "footer": "Fan Control",
     "details": True,         # add CPU / fans / mode fields under the message
     "mention": "",           # "", "here", "everyone", "role:<id>", "user:<id>"
     "mention_levels": ["error"],
@@ -356,7 +298,7 @@ def build_payload(cfg, kind, values):
                            for n, k in (("CPU", "cpu"), ("Fans", "speed"), ("Mode", "mode"))]
         embed["fields"][0]["value"] += "°C" if values.get("cpu") not in (None, "", "—") else ""
     payload = {"username": cfg["username"], "embeds": [embed],
-               "allowed_mentions": {"parse": []}}  # text from the iDRAC can never ping anyone
+               "allowed_mentions": {"parse": []}}  # text from the BMC can never ping anyone
     m = cfg["mention"]
     if m and level in cfg["mention_levels"]:
         kind_, _, ident = m.partition(":")
@@ -412,14 +354,15 @@ def report_values(server, minutes):
     avg = lambda xs: sum(xs) / len(xs) if xs else None
     num = lambda v, unit="": "—" if v is None else f"{v:.0f}{unit}"
     values = {
-        "server": server.name, "host": server.host, "model": st["model"] or "Dell server",
+        "server": server.name, "host": server.host, "model": st["model"] or server.driver.label,
         "cpu": num(st["cpu_temp"]), "mode": server.settings()["mode"], "reason": st["reason"],
-        "speed": "Dell automatic" if st["effective"] == "dell" else num(st["applied_speed"], "%"),
+        "speed": speed_text(st["effective"], st["applied_speed"]),
         "error": st["error"] or "", "failsafe": server.settings()["failsafe_temp"], "interval": INTERVAL,
         "time": time.strftime("%H:%M:%S"), "period": period_text(minutes),
         "cpu_min": num(min(cpu) if cpu else None), "cpu_avg": num(avg(cpu)), "cpu_max": num(max(cpu) if cpu else None),
         "speed_avg": num(avg(speed), "%"), "power_avg": num(avg(watts)),
         "dell_pct": num(100 * sum(p.get("speed") is None for p in pts) / len(pts) if pts else None),
+        "fan_now": num(avg([f["pct"] for f in sens.get("fans", []) if f["pct"] is not None]), "%"),
         "watts": num(sens.get("watts")), "inlet": num(sens.get("inlet")), "exhaust": num(sens.get("exhaust")),
     }
     return values, {"cpu": cpu, "speed": speed, "watts": watts}, events
@@ -430,10 +373,11 @@ def build_report(cfg, servers):
     embeds = []
     for server in list(servers.values())[:10]:  # Discord allows 10 embeds per message
         v, series, events = report_values(server, cfg["report_minutes"])
-        state = "🔴 iDRAC error" if v["error"] else "🟠 failsafe" if server.state["failsafe"] else "🟢 ok"
+        state = "🔴 BMC error" if v["error"] else "🟠 failsafe" if server.state["failsafe"] else "🟢 ok"
         fields = [
             {"name": "CPU", "value": f"**{v['cpu']}°C** now\n{v['cpu_min']}–{v['cpu_max']}°C · avg {v['cpu_avg']}°C", "inline": True},
-            {"name": "Fans", "value": f"**{v['speed']}**\navg {v['speed_avg']} · Dell {v['dell_pct']}% of the time", "inline": True},
+            {"name": "Fans", "value": (f"**{v['speed']}**\navg {v['speed_avg']} · automatic {v['dell_pct']}% of the time"
+                                       if server.control else f"**{v['fan_now']}** (set by the BMC)"), "inline": True},
             {"name": "Power", "value": f"**{v['watts']} W** now\navg {v['power_avg']} W", "inline": True},
             {"name": "Air", "value": f"in {v['inlet']}°C · out {v['exhaust']}°C", "inline": True},
             {"name": "Status", "value": f"{state} · mode {v['mode']}", "inline": True},
@@ -512,10 +456,9 @@ def notify(server, kind, **values):
             return
         last_alert[key] = now
     st, s = server.state, server.settings()
-    base = {"server": server.name, "host": server.host, "model": st["model"] or "",
+    base = {"server": server.name, "host": server.host, "model": st["model"] or server.driver.label,
             "cpu": "—" if st["cpu_temp"] is None else f"{st['cpu_temp']:.0f}",
-            "speed": "Dell automatic" if st["effective"] == "dell" else
-                     "—" if st["applied_speed"] is None else f"{st['applied_speed']}%",
+            "speed": speed_text(st["effective"], st["applied_speed"]),
             "mode": s["mode"], "reason": st["reason"], "error": st["error"] or "",
             "failsafe": s["failsafe_temp"], "threshold": cfg["hot_threshold"], "interval": INTERVAL,
             "time": time.strftime("%H:%M:%S")}
@@ -533,31 +476,41 @@ def notify(server, kind, **values):
 # ---------------------------------------------------------------- one server
 
 class Server:
-    def __init__(self, sid, name, host, user, password, legacy=False):
-        self.id, self.name, self.host, self.user, self.password = sid, name, host, user, password
-        self.demo = host == "demo"
-        # the single-server setup of earlier versions keeps its settings file
-        self.settings_file = DATA_DIR / ("settings.json" if legacy else f"settings-{sid}.json")
-        self.history_file = DATA_DIR / f"history-{sid}.json"
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.id, self.name, self.host = cfg["id"], cfg["name"], cfg.get("host", "")
+        self.driver = DRIVERS[cfg["driver"]](cfg.get("host", ""), cfg.get("username", ""), cfg.get("password", ""),
+                                             cfg.get("verify_tls", False), str(DATA_DIR))
+        # the single-server setup of 1.0 keeps its settings file
+        self.settings_file = DATA_DIR / ("settings.json" if cfg.get("legacy") else f"settings-{self.id}.json")
+        self.history_file = DATA_DIR / f"history-{self.id}.json"
         self.lock = threading.Lock()
         self.wake = threading.Event()
+        self.stop = threading.Event()
         self.history = deque(maxlen=HISTORY_SECONDS // INTERVAL)
         self.events = deque(maxlen=100)
         self.window = deque()  # (time, target) pairs for the ramp-down delay
-        self.fan_ids = None    # None: the 0xff broadcast works; list: per-fan identifiers
         self.hot = False       # above the "running hot" alert threshold
         self.saved = time.time()
+        self.pcie_applied = None
         self.state = {"sensors": None, "cpu_temp": None, "effective": None, "applied_speed": None,
                       "target_speed": None, "reason": "", "failsafe": False, "error": None,
-                      "updated": None, "power": None, "pcie_applied": None, "model": None}
+                      "updated": None, "power": None, "model": None}
+
+    @property
+    def control(self):
+        return self.driver.control
 
     # ---- settings and persistence
 
     def settings(self):
         try:
-            return {**DEFAULT_SETTINGS, **json.loads(self.settings_file.read_text())}
+            s = {**DEFAULT_SETTINGS, **json.loads(self.settings_file.read_text())}
         except (OSError, ValueError):
-            return dict(DEFAULT_SETTINGS)
+            s = dict(DEFAULT_SETTINGS)
+        if s["mode"] == "dell":  # 1.x name of automatic mode
+            s["mode"] = "auto"
+        return s
 
     def save_settings(self, s):
         write_json(self.settings_file, s)
@@ -590,101 +543,15 @@ class Server:
         self.events.appendleft({"t": time.time(), "level": level, "msg": msg})
         print(time.strftime("%H:%M:%S"), f"[{self.id}]", level.upper(), msg, flush=True)
 
-    # ---- IPMI
-
-    def ipmi(self, *args, timeout=20):
-        if self.host == "local":
-            cmd = ["ipmitool", "-I", "open", *args]
-        else:
-            # -E reads the password from IPMI_PASSWORD so it never shows up in `ps`
-            cmd = ["ipmitool", "-I", "lanplus", "-H", self.host, "-U", self.user, "-E", *args]
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                               env={"PATH": os.environ.get("PATH", ""), "IPMI_PASSWORD": self.password})
-        except (OSError, subprocess.TimeoutExpired) as e:
-            raise IPMIError(str(e)) from e
-        if r.returncode != 0:
-            msg = (r.stderr or r.stdout).strip() or f"ipmitool exit {r.returncode}"
-            hint = next((h for code, h in HINTS.items() if code in msg), None)
-            raise IPMIError(f"{msg} ({hint})" if hint else msg)
-        return r.stdout
-
-    def set_dell_auto(self):
-        if not self.demo:
-            self.ipmi("raw", "0x30", "0x30", "0x01", "0x01")
-
-    def set_fixed(self, speed):
-        if self.demo:
-            return
-        self.ipmi("raw", "0x30", "0x30", "0x01", "0x00")
-        try:
-            if self.fan_ids is None:
-                try:
-                    self.ipmi("raw", "0x30", "0x30", "0x02", "0xff", f"0x{speed:02x}")
-                except IPMIError as e:
-                    if not is_refusal(e):
-                        raise
-                    self.discover_fans(speed)
-            else:
-                for i in self.fan_ids:
-                    self.ipmi("raw", "0x30", "0x30", "0x02", f"0x{i:02x}", f"0x{speed:02x}")
-        except IPMIError:
-            self.set_dell_auto()  # never leave manual mode on with an unknown speed
-            raise
-
-    def discover_fans(self, speed):
-        """Some 11th-generation BMCs refuse the 0xff 'all fans' selector but accept fans one by
-        one. Ask which identifiers they take instead of guessing from the sensor list."""
-        ids = []
-        for i in range(16):
-            try:
-                self.ipmi("raw", "0x30", "0x30", "0x02", f"0x{i:02x}", f"0x{speed:02x}")
-                ids.append(i)
-            except IPMIError as e:
-                if not is_refusal(e):
-                    raise
-        if not ids:
-            raise IPMIError("the iDRAC refused every fan identifier (rsp=0xcc)")
-        self.fan_ids = ids
-        self.log(f"Fans are set one by one on this server (identifiers {', '.join(map(str, ids))})")
-
-    def set_pcie_cooling(self, enabled):
-        if not self.demo:
-            self.ipmi("raw", "0x30", "0xce", "0x00", "0x16", "0x05", "0x00", "0x00", "0x00",
-                      "0x05", "0x00", "0x00" if enabled else "0x01", "0x00", "0x00")
-
-    # ---- demo data
-
-    @staticmethod
-    def demo_cpu(t):
-        return 44 + 9 * abs(((t / 1800) % 2) - 1) + random.uniform(-.4, .4)
-
-    @staticmethod
-    def demo_inlet(t):
-        return 22 + abs(((t / 5400) % 2) - 1)
-
-    def demo_sdr(self):
-        speed = self.state.get("applied_speed") or 40
-        t = time.time()
-        cpu = self.demo_cpu(t)
-        rpm = int(1800 + speed * 120)
-        lines = [f"Inlet Temp | 04h | ok | 7.1 | {self.demo_inlet(t):.0f} degrees C",
-                 f"Exhaust Temp | 01h | ok | 7.1 | {cpu - 12:.0f} degrees C",
-                 f"Temp | 0Eh | ok | 3.1 | {cpu:.0f} degrees C",
-                 f"Temp | 0Fh | ok | 3.2 | {cpu - 3:.0f} degrees C",
-                 f"Pwr Consumption | 77h | ok | 7.1 | {100 + cpu + random.uniform(-2, 2):.0f} Watts"]
-        lines += [f"Fan{i} RPM | 3{i}h | ok | 7.1 | {rpm + random.randint(-60, 60)} RPM" for i in range(1, 7)]
-        return "\n".join(lines)
-
     def demo_backfill(self):
         now = time.time()
         for i in range(self.history.maxlen, 0, -1):
             t = now - i * INTERVAL
-            cpu = self.demo_cpu(t)
+            cpu = DemoDriver.cpu_at(t)
             speed = None if 1500 < i * INTERVAL < 1900 else curve_speed(DEFAULT_SETTINGS["curve"], cpu)
             self.history.append({"t": round(t), "cpu": round(cpu, 1), "speed": speed,
-                                 "inlet": round(self.demo_inlet(t), 1), "exhaust": round(cpu - 12, 1),
-                                 "rpm": 1800 + (speed or 60) * 120,
+                                 "inlet": round(DemoDriver.inlet_at(t), 1), "exhaust": round(cpu - 12, 1),
+                                 "rpm": 1800 + (speed or 60) * 120, "fanpct": None,
                                  "watts": round(100 + cpu + random.uniform(-2, 2))})
 
     # ---- control loop
@@ -692,23 +559,27 @@ class Server:
     def cycle(self):
         settings = self.settings()
         try:
-            sensors = parse_sdr(self.demo_sdr() if self.demo else self.ipmi("sdr", "elist", "full"))
-            power = "on" if self.demo else ("on" if "is on" in self.ipmi("chassis", "power", "status") else "off")
-        except IPMIError as e:
+            sensors = self.driver.read()
+        except DriverError as e:
             with self.lock:
                 if self.state["error"] != str(e):
-                    self.log(f"iDRAC unreachable: {e}", "error")
+                    self.log(f"Cannot read the BMC: {e}", "error")
                     if self.state["error"] is None:
                         notify(self, "unreachable", error=str(e))
                 self.state.update(error=str(e), updated=time.time())
             return
+        power = sensors.pop("power")
+        self.state["model"] = self.driver.model or self.state["model"]
 
         cpus = [t["value"] for t in sensors["temps"] if t["cpu"]]
         cpu = max(cpus) if cpus else max((t["value"] for t in sensors["temps"]), default=None)
         was_failsafe = self.state["failsafe"]
-        effective, target, reason, failsafe = decide(settings, cpu, was_failsafe)
-        if power == "off":
-            effective, target, reason = "dell", None, "server is powered off"
+        if self.control:
+            effective, target, reason, failsafe = decide(settings, cpu, was_failsafe)
+            if power == "off":
+                effective, target, reason = "auto", None, "server is powered off"
+        else:
+            effective, target, reason, failsafe = "monitor", None, "monitoring only", False
         speed = None
         with self.lock:  # save_settings() clears the window from the HTTP thread
             if effective == "manual":
@@ -719,31 +590,32 @@ class Server:
             reason += f", holding {speed}% for ramp-down"
 
         error = None
-        try:
-            if effective == "dell":
-                self.set_dell_auto()
-            else:
-                self.set_fixed(speed)  # re-sent every cycle: an iDRAC reset silently returns to Dell mode
-        except IPMIError as e:
-            error = f"fan command refused: {e}"
-            effective, speed, reason = "dell", None, "iDRAC refused the fan command"
-        if settings["pcie_cooling"] is not None and settings["pcie_cooling"] != self.state["pcie_applied"]:
+        if self.control:
             try:
-                self.set_pcie_cooling(settings["pcie_cooling"])
-                self.log(f"Third-party PCIe cooling response {'enabled' if settings['pcie_cooling'] else 'disabled'}")
-            except IPMIError as e:
-                self.log(f"Third-party PCIe cooling command refused: {e}", "error")
-            self.state["pcie_applied"] = settings["pcie_cooling"]  # tried once per change, not every cycle
+                if effective == "auto":
+                    self.driver.set_auto()
+                else:
+                    self.driver.set_speed(speed)  # re-sent every cycle: a BMC reset silently returns to auto
+            except DriverError as e:
+                error = f"fan command refused: {e}"
+                effective, speed, reason = "auto", None, "the BMC refused the fan command"
+            if self.driver.pcie and settings["pcie_cooling"] is not None and settings["pcie_cooling"] != self.pcie_applied:
+                try:
+                    self.driver.set_pcie(settings["pcie_cooling"])
+                    self.log(f"Third-party PCIe cooling response {'enabled' if settings['pcie_cooling'] else 'disabled'}")
+                except DriverError as e:
+                    self.log(f"Third-party PCIe cooling command refused: {e}", "error")
+                self.pcie_applied = settings["pcie_cooling"]  # tried once per change, not every cycle
 
         vals = {"cpu": "—" if cpu is None else f"{cpu:.0f}", "reason": reason, "error": error or "",
-                "speed": "Dell automatic" if effective == "dell" else f"{speed}%"}
+                "speed": speed_text(effective, speed)}
         with self.lock:
             prev = self.state
-            if (effective, speed) != (prev["effective"], prev["applied_speed"]):
-                self.log(f"Fans → {'Dell automatic' if effective == 'dell' else f'{speed}%'} ({reason})",
+            if (effective, speed) != (prev["effective"], prev["applied_speed"]) and effective != "monitor":
+                self.log(f"Fans → {'automatic' if effective == 'auto' else f'{speed}%'} ({reason})",
                          "warn" if failsafe or error else "info")
             if prev["error"] and not error:
-                self.log("iDRAC responding again", "info")
+                self.log("BMC responding again", "info")
                 notify(self, "recovered", **vals)
             if error and error != prev["error"]:
                 self.log(error, "error")
@@ -762,71 +634,197 @@ class Server:
             self.state.update(sensors=sensors, cpu_temp=cpu, effective=effective, applied_speed=speed,
                               target_speed=target, reason=reason, failsafe=failsafe, error=error,
                               updated=time.time(), power=power)
-            rpms = [f["rpm"] for f in sensors["fans"]]
+            rpms = [f["rpm"] for f in sensors["fans"] if f["rpm"] is not None]
+            pcts = [f["pct"] for f in sensors["fans"] if f["pct"] is not None]
             self.history.append({"t": round(time.time()), "cpu": cpu, "speed": speed,
                                  "inlet": sensors["inlet"], "exhaust": sensors["exhaust"],
                                  "rpm": round(sum(rpms) / len(rpms)) if rpms else None,
+                                 "fanpct": round(sum(pcts) / len(pcts)) if pcts else None,
                                  "watts": sensors["watts"]})
+
+    def release(self):
+        """Hand the fans back to the BMC: on shutdown, removal, or a change of driver."""
+        if self.control:
+            try:
+                self.driver.set_auto()
+            except DriverError as e:
+                print(f"[{self.id}] could not restore automatic fan control:", e, file=sys.stderr)
 
     def run(self):
         restored = self.load_history()
-        self.log(f"Controller started: iDRAC {self.host}, every {INTERVAL}s"
-                 + (", history restored" if restored else ""))
-        if self.demo:
-            self.state["model"] = "PowerEdge (demo)"
-            if not restored:
-                self.demo_backfill()
-        else:
-            try:
-                fru = self.ipmi("fru", "print", "0")
-                self.state["model"] = next((line.split(":", 1)[1].strip() for line in fru.splitlines()
-                                            if line.strip().startswith("Product Name")), None)
-            except IPMIError:
-                pass  # cosmetic only
+        where = "simulated data" if self.driver.kind == "demo" else self.host or "local BMC"
+        self.log(f"Started: {self.driver.label}, {where}, every {INTERVAL}s" + (", history restored" if restored else ""))
+        if self.driver.kind == "demo" and not restored:
+            self.demo_backfill()
         notify(self, "started")
-        while True:
+        while not self.stop.is_set():
             try:
                 self.cycle()
             except Exception as e:  # never let a bug kill the loop and leave fans pinned low
-                self.log(f"Controller error: {e!r}; handing fans back to Dell", "error")
+                self.log(f"Controller error: {e!r}; handing fans back to the BMC", "error")
                 notify(self, "controller_error", error=repr(e))
-                try:
-                    self.set_dell_auto()
-                except IPMIError:
-                    pass
+                self.release()
             if time.time() - self.saved > SAVE_EVERY:
                 self.save_history()
             self.wake.wait(INTERVAL)
             self.wake.clear()
 
+    def info(self):
+        """Server description for the browser. Never includes the password."""
+        d = self.driver
+        return {"id": self.id, "name": self.name, "host": self.host, "driver": d.kind, "driver_label": d.label,
+                "vendor": d.vendor, "control": d.control, "pcie": d.pcie, "experimental": d.experimental,
+                "monitor_reason": d.monitor_reason, "source": self.cfg.get("source", "dashboard")}
+
     def summary(self):
         s = self.state
-        return {"id": self.id, "name": self.name, "model": s["model"], "cpu_temp": s["cpu_temp"],
-                "effective": s["effective"], "applied_speed": s["applied_speed"],
-                "failsafe": s["failsafe"], "error": bool(s["error"])}
+        now = time.time()
+        with self.lock:
+            hour = [p for p in self.history if p["t"] > now - 3600]
+        step = max(1, len(hour) // 60)
+        fans = (s["sensors"] or {}).get("fans", [])
+        return {**self.info(), "model": s["model"], "cpu_temp": s["cpu_temp"], "effective": s["effective"],
+                "mode": self.settings()["mode"],
+                "applied_speed": s["applied_speed"], "failsafe": s["failsafe"], "error": s["error"],
+                "power": s["power"], "updated": s["updated"],
+                "watts": (s["sensors"] or {}).get("watts"), "inlet": (s["sensors"] or {}).get("inlet"),
+                "fan_pct": round(sum(f["pct"] for f in fans if f["pct"] is not None) / max(1, sum(f["pct"] is not None for f in fans)))
+                if any(f["pct"] is not None for f in fans) else None,
+                "fan_rpm": round(sum(f["rpm"] for f in fans if f["rpm"] is not None) / max(1, sum(f["rpm"] is not None for f in fans)))
+                if any(f["rpm"] is not None for f in fans) else None,
+                "spark": [[p["t"], p["cpu"], p["speed"]] for p in hour[::step]]}
+
+
+def speed_text(effective, speed):
+    return {"auto": "automatic", "monitor": "set by the BMC"}.get(effective) or ("—" if speed is None else f"{speed}%")
+
+
+# ---------------------------------------------------------------- server registry
+
+SERVERS_FILE = DATA_DIR / "servers.json"
+SERVERS = {}
+registry_lock = threading.Lock()
 
 
 def slug(text):
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "server"
 
 
-def load_servers(env=os.environ):
-    """One server from IDRAC_HOST/IDRAC_USERNAME/IDRAC_PASSWORD/IDRAC_NAME, and/or several
-    from IDRAC_1_HOST, IDRAC_1_USERNAME, ... IDRAC_N_HOST."""
+def unique_id(name, taken):
+    sid = base = slug(name)
+    n = 2
+    while sid in taken:
+        sid, n = f"{base}-{n}", n + 1
+    return sid
+
+
+def env_servers(env=os.environ):
+    """Servers declared in the environment: IDRAC_HOST/... for one, IDRAC_1_HOST/... for several.
+    IDRAC_DRIVER (or IDRAC_1_DRIVER) picks the hardware; Dell by default, demo for IDRAC_HOST=demo."""
     numbered = sorted(int(m.group(1)) for k in env if (m := re.fullmatch(r"IDRAC_(\d+)_HOST", k)))
-    specs = [("", True)] if env.get("IDRAC_HOST") or not numbered else []
+    specs = [("", True)] if env.get("IDRAC_HOST") else []
     specs += [(f"{n}_", False) for n in numbered]
-    servers = {}
+    out, taken = [], set()
     for prefix, legacy in specs:
-        host = env.get(f"IDRAC_{prefix}HOST", "local")
-        name = env.get(f"IDRAC_{prefix}NAME") or ("Demo server" if host == "demo" else host)
-        sid = base = slug(name)
-        n = 2
-        while sid in servers:
-            sid, n = f"{base}-{n}", n + 1
-        servers[sid] = Server(sid, name, host, env.get(f"IDRAC_{prefix}USERNAME", "root"),
-                              env.get(f"IDRAC_{prefix}PASSWORD", "calvin"), legacy)
-    return servers
+        host = env.get(f"IDRAC_{prefix}HOST", "")
+        driver = env.get(f"IDRAC_{prefix}DRIVER") or ("demo" if host == "demo" else "dell")
+        if driver not in DRIVERS:
+            print(f"WARNING: IDRAC_{prefix}DRIVER={driver} is unknown; use one of {', '.join(DRIVERS)}", flush=True)
+            continue
+        name = env.get(f"IDRAC_{prefix}NAME") or ("Demo server" if driver == "demo" else host)
+        sid = unique_id(name, taken)
+        taken.add(sid)
+        out.append({"id": sid, "name": name, "driver": driver, "host": "" if driver == "demo" else host,
+                    "username": env.get(f"IDRAC_{prefix}USERNAME", "root"),
+                    "password": env.get(f"IDRAC_{prefix}PASSWORD", "calvin"),
+                    "verify_tls": env.get(f"IDRAC_{prefix}VERIFY_TLS", "").lower() in ("1", "true", "yes"),
+                    "source": "environment", "legacy": legacy})
+    return out
+
+
+def dashboard_servers():
+    try:
+        return [s for s in json.loads(SERVERS_FILE.read_text()) if s.get("driver") in DRIVERS]
+    except (OSError, ValueError):
+        return []
+
+
+def save_dashboard_servers():
+    rows = [{k: v for k, v in s.cfg.items() if k != "source"}
+            for s in SERVERS.values() if s.cfg.get("source") == "dashboard"]
+    write_json(SERVERS_FILE, rows)
+    try:
+        SERVERS_FILE.chmod(0o600)  # holds BMC passwords
+    except OSError:
+        pass
+
+
+def start(cfg):
+    srv = Server(cfg)
+    SERVERS[srv.id] = srv
+    threading.Thread(target=srv.run, daemon=True, name=srv.id).start()
+    return srv
+
+
+def stop(srv, forget=False):
+    srv.stop.set()
+    srv.wake.set()
+    srv.release()
+    srv.save_history()
+    SERVERS.pop(srv.id, None)
+    if forget:
+        for f in (srv.settings_file, srv.history_file):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+
+
+def validate_server(new, current=None):
+    """A server added or edited in the dashboard. On edit, an empty password keeps the stored one."""
+    cfg = dict(current or {"source": "dashboard"})
+    name = str(new.get("name", cfg.get("name", ""))).strip()
+    if not 1 <= len(name) <= 60:
+        raise ValueError("give the server a name of 1 to 60 characters")
+    driver = new.get("driver", cfg.get("driver"))
+    if driver not in DRIVERS:
+        raise ValueError("pick a server type")
+    host = str(new.get("host", cfg.get("host", ""))).strip()
+    if DRIVERS[driver].needs_host:
+        m = re.fullmatch(r"(.+?)(?::(\d{1,5}))?", host)
+        name_part, port = (m.group(1), m.group(2)) if m and not (host.count(":") > 1 and not host.startswith("[")) else (host, None)
+        redfish = issubclass(DRIVERS[driver], RedfishDriver)
+        if not HOST_RE.fullmatch(name_part) or (port and (not redfish or not 0 < int(port) < 65536)):
+            raise ValueError("the address must be a host name or IP" + (", optionally with :port" if redfish else ""))
+        if host == "local" and redfish:
+            raise ValueError("local access only works for IPMI servers")
+    else:
+        host = ""
+    username = str(new.get("username", cfg.get("username", ""))).strip()
+    if DRIVERS[driver].needs_host and not 1 <= len(username) <= 64:
+        raise ValueError("enter the BMC user name")
+    password = new.get("password")
+    if password:
+        if len(str(password)) > 128:
+            raise ValueError("the password is limited to 128 characters")
+        cfg["password"] = str(password)
+    elif DRIVERS[driver].needs_host and not cfg.get("password"):
+        raise ValueError("enter the BMC password")
+    verify = new.get("verify_tls", cfg.get("verify_tls", False))
+    if type(verify) is not bool:
+        raise ValueError("verify_tls must be true or false")
+    cfg.update(name=name, driver=driver, host=host, username=username, verify_tls=verify)
+    return cfg
+
+
+def load_registry():
+    taken = set()
+    for cfg in env_servers() + dashboard_servers():
+        if cfg["id"] in taken:  # an environment server and a saved one with the same name
+            cfg["id"] = unique_id(cfg["id"], taken)
+        taken.add(cfg["id"])
+        cfg.setdefault("source", "dashboard")
+        SERVERS[cfg["id"]] = Server(cfg)
 
 
 # ---------------------------------------------------------------- sessions
@@ -878,17 +876,18 @@ def metrics(servers):
         rows.append(f"{name}{{{lab}}} {value:.15g}")
 
     add("idrac_fan_control_info", "Build information.", {"version": VERSION}, 1)
-    for s in servers.values():
-        st, sens, lbl = s.state, s.state["sensors"] or {}, {"server": s.id, "name": s.name}
-        add("idrac_up", "1 if the last iDRAC reading succeeded.", lbl, 0 if st["error"] or not st["updated"] else 1)
+    for s in list(servers.values()):
+        st, sens = s.state, s.state["sensors"] or {}
+        lbl = {"server": s.id, "name": s.name, "driver": s.driver.kind}
+        add("idrac_up", "1 if the last BMC reading succeeded.", lbl, 0 if st["error"] or not st["updated"] else 1)
         add("idrac_last_update_timestamp_seconds", "Unix time of the last reading.", lbl, st["updated"])
         add("idrac_power_on", "1 if the server is powered on.", lbl,
             None if st["power"] is None else int(st["power"] == "on"))
-        add("idrac_dell_control", "1 if the iDRAC's own fan control is active.", lbl,
-            None if st["effective"] is None else int(st["effective"] == "dell"))
-        add("idrac_failsafe_active", "1 while the failsafe temperature has handed control to the iDRAC.",
+        add("idrac_dell_control", "1 if the BMC's own fan control is active (any vendor).", lbl,
+            None if st["effective"] is None else int(st["effective"] != "manual"))
+        add("idrac_failsafe_active", "1 while the failsafe temperature has handed control to the BMC.",
             lbl, int(st["failsafe"]))
-        add("idrac_fan_speed_percent", "Fan speed set by the controller (absent in Dell mode).", lbl, st["applied_speed"])
+        add("idrac_fan_speed_percent", "Fan speed set by the controller (absent in automatic mode).", lbl, st["applied_speed"])
         add("idrac_cpu_temperature_celsius", "Hottest CPU temperature.", lbl, st["cpu_temp"])
         add("idrac_inlet_temperature_celsius", "Inlet air temperature.", lbl, sens.get("inlet"))
         add("idrac_exhaust_temperature_celsius", "Exhaust air temperature.", lbl, sens.get("exhaust"))
@@ -897,7 +896,8 @@ def metrics(servers):
             add("idrac_temperature_celsius", "Temperature sensor reading.",
                 {**lbl, "sensor": t["name"], "entity": t["entity"]}, t["value"])
         for f in sens.get("fans", []):
-            add("idrac_fan_rpm", "Fan speed.", {**lbl, "fan": f["name"]}, f["rpm"])
+            add("idrac_fan_rpm", "Fan speed in RPM.", {**lbl, "fan": f["name"]}, f["rpm"])
+            add("idrac_fan_percent", "Fan speed in percent, as reported by the BMC.", {**lbl, "fan": f["name"]}, f["pct"])
     return "\n".join(row for rows in out.values() for row in rows) + "\n"
 
 
@@ -909,6 +909,8 @@ STATIC = {  # allowlist: nothing outside it is ever read from disk
     "login.js": "text/javascript; charset=utf-8",
     "embed.js": "text/javascript; charset=utf-8",
     "alerts.js": "text/javascript; charset=utf-8",
+    "integrations.js": "text/javascript; charset=utf-8",
+    "grafana.json": "application/json",
     "icon.svg": "image/svg+xml",
     "fonts/archivo.woff2": "font/woff2",
     "fonts/plex-mono-400.woff2": "font/woff2",
@@ -979,7 +981,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def server_arg(self):
         sid = self.query.get("server", [""])[0]
-        return SERVERS.get(sid) or (None if sid else next(iter(SERVERS.values())))
+        return SERVERS.get(sid) or (None if sid or not SERVERS else next(iter(SERVERS.values())))
 
     def parse(self):
         url = urlsplit(self.path)
@@ -992,7 +994,7 @@ class Handler(BaseHTTPRequestHandler):
         self.parse()
         path = self.route
         if path == "/healthz":
-            stale = [s.id for s in SERVERS.values()
+            stale = [s.id for s in list(SERVERS.values())
                      if not s.state["updated"] or time.time() - s.state["updated"] > INTERVAL * 4]
             return self.send(503 if stale else 200, {"ok": not stale, "stale": stale})
         if path.startswith("/static/") and path[8:] in STATIC:
@@ -1017,18 +1019,35 @@ class Handler(BaseHTTPRequestHandler):
             if srv is None:
                 return self.send(404, {"error": "unknown server"})
             with srv.lock:
-                return self.send(200, {**srv.state, "id": srv.id, "name": srv.name, "host": srv.host,
-                                       "interval": INTERVAL, "auth": bool(WEB_PASSWORD),
-                                       "alerts": bool(webhook_of(alert_config())), "version": VERSION,
-                                       "settings": srv.settings(), "history": list(srv.history),
-                                       "events": list(srv.events),
-                                       "servers": [s.summary() for s in SERVERS.values()]})
+                return self.send(200, {**srv.state, **srv.info(), "interval": INTERVAL, "auth": bool(WEB_PASSWORD),
+                                       "version": VERSION, "settings": srv.settings(),
+                                       "history": list(srv.history), "events": list(srv.events)})
         if not self.authed():
             return self.redirect("/login") if path == "/" else self.send(401, {"error": "sign in required"})
-        if path == "/api/alerts":
-            return self.send(200, public_alert_config(alert_config()))
         if path == "/":
             return self.file(PAGES[path], "text/html; charset=utf-8")
+        if path == "/api/overview":
+            return self.send(200, {"servers": [s.summary() for s in list(SERVERS.values())],
+                                   "drivers": [d.info() for d in DRIVERS.values()],
+                                   "auth": bool(WEB_PASSWORD), "version": VERSION, "interval": INTERVAL,
+                                   "alerts": bool(webhook_of(alert_config()))})
+        if path.startswith("/api/servers/") and path.count("/") == 3:
+            srv = SERVERS.get(path.rsplit("/", 1)[1])
+            if srv is None:
+                return self.send(404, {"error": "unknown server"})
+            return self.send(200, {**srv.info(), "username": srv.cfg.get("username", ""),
+                                   "verify_tls": srv.cfg.get("verify_tls", False),
+                                   "has_password": bool(srv.cfg.get("password"))})
+        if path == "/api/alerts":
+            return self.send(200, public_alert_config(alert_config()))
+        if path == "/api/integrations":
+            # whether each integration is switched on; the tokens themselves never leave the server
+            return self.send(200, {"auth": bool(WEB_PASSWORD), "metrics_token": bool(METRICS_TOKEN),
+                                   "metrics_open": not WEB_PASSWORD and not METRICS_TOKEN,
+                                   "embed_token": bool(EMBED_TOKEN), "interval": INTERVAL,
+                                   "servers": [{"id": s.id, "name": s.name} for s in list(SERVERS.values())]})
+        if path == "/api/metrics-preview":
+            return self.send(200, metrics(SERVERS).encode(), "text/plain; charset=utf-8")
         self.send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -1086,6 +1105,8 @@ class Handler(BaseHTTPRequestHandler):
             url = webhook_of(cfg)
             if kind not in ALERT_KINDS or not url:
                 return self.send(400, {"error": "unknown alert" if url else "no Discord webhook configured"})
+            if kind == "report" and not SERVERS:
+                return self.send(400, {"error": "add a server first"})
             # the status report is tested with the real readings, everything else with sample values
             payload = build_report(cfg, SERVERS) if kind == "report" else build_payload(cfg, kind, SAMPLE)
             payload["embeds"][0]["title"] = "[test] " + payload["embeds"][0]["title"][:249]
@@ -1094,6 +1115,38 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.send(502, {"error": f"Discord answered: {e}"})
             return self.send(200, {"ok": True})
+        if self.route == "/api/servers/test":
+            return self.test_server(body)
+        if self.route == "/api/servers":
+            with registry_lock:
+                try:
+                    cfg = validate_server(body)
+                except (ValueError, TypeError) as e:
+                    return self.send(400, {"error": str(e)})
+                cfg["id"] = unique_id(cfg["name"], SERVERS)
+                srv = start(cfg)
+                save_dashboard_servers()
+            return self.send(201, srv.info())
+        m = re.fullmatch(r"/api/servers/([a-z0-9-]+)(/delete)?", self.route)
+        if m:
+            with registry_lock:
+                srv = SERVERS.get(m.group(1))
+                if srv is None:
+                    return self.send(404, {"error": "unknown server"})
+                if srv.cfg.get("source") == "environment":
+                    return self.send(409, {"error": "this server is defined in the environment; change it there"})
+                if m.group(2):
+                    stop(srv, forget=True)
+                    save_dashboard_servers()
+                    return self.send(200, {"ok": True})
+                try:
+                    cfg = validate_server(body, srv.cfg)
+                except (ValueError, TypeError) as e:
+                    return self.send(400, {"error": str(e)})
+                stop(srv)  # restart with the new address, credentials or driver
+                srv = start(cfg)
+                save_dashboard_servers()
+            return self.send(200, srv.info())
         if self.route != "/api/settings":
             return self.send(404, {"error": "not found"})
         srv = self.server_arg()
@@ -1105,6 +1158,25 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(400, {"error": str(e)})
         srv.save_settings(s)
         self.send(200, s)
+
+    def test_server(self, body):
+        """Read the BMC once with the details being entered, before they are saved."""
+        stored = SERVERS.get(str(body.get("id", "")))
+        try:
+            cfg = validate_server(body, stored.cfg if stored and stored.cfg.get("source") == "dashboard" else None)
+        except (ValueError, TypeError) as e:
+            return self.send(400, {"ok": False, "error": str(e)})
+        drv = DRIVERS[cfg["driver"]](cfg["host"], cfg["username"], cfg.get("password", ""), cfg["verify_tls"], str(DATA_DIR))
+        try:
+            data = drv.read()
+        except DriverError as e:
+            return self.send(200, {"ok": False, "error": str(e)})
+        except Exception as e:
+            return self.send(200, {"ok": False, "error": repr(e)})
+        cpus = [t["value"] for t in data["temps"] if t["cpu"]]
+        return self.send(200, {"ok": True, "model": drv.model, "temps": len(data["temps"]), "fans": len(data["fans"]),
+                               "cpu": max(cpus) if cpus else None, "watts": data["watts"], "power": data["power"],
+                               "control": drv.control})
 
 
 def data_dir_writable():
@@ -1121,7 +1193,7 @@ def data_dir_writable():
 if not data_dir_writable():
     sys.exit(f"ERROR: cannot write to {DATA_DIR.resolve()}. The container runs as uid 1000; "
              "fix the volume's owner with: chown -R 1000:1000 <host folder>")
-SERVERS = load_servers()
+load_registry()
 KEY = session_key() if WEB_PASSWORD else b""
 
 if DISCORD_WEBHOOK and not WEBHOOK_RE.fullmatch(DISCORD_WEBHOOK):
@@ -1129,12 +1201,9 @@ if DISCORD_WEBHOOK and not WEBHOOK_RE.fullmatch(DISCORD_WEBHOOK):
 
 
 def shutdown(*_):
-    for s in SERVERS.values():
-        s.log("Stopping: handing fans back to Dell automatic control")
-        try:
-            s.set_dell_auto()
-        except IPMIError as e:
-            print(f"[{s.id}] could not restore Dell mode:", e, file=sys.stderr)
+    for s in list(SERVERS.values()):
+        s.log("Stopping: handing fans back to automatic control")
+        s.release()
         s.save_history()
     os._exit(0)
 
@@ -1144,10 +1213,10 @@ def serve():
     signal.signal(signal.SIGINT, shutdown)
     if not WEB_PASSWORD:
         print("WARNING: WEB_PASSWORD is not set; the dashboard is open to anyone who can reach it", flush=True)
-    for srv in SERVERS.values():
+    for srv in list(SERVERS.values()):
         threading.Thread(target=srv.run, daemon=True, name=srv.id).start()
     threading.Thread(target=reporter, daemon=True, name="reporter").start()
-    print(f"iDRAC Fan Control {VERSION} listening on :{PORT} for {len(SERVERS)} server(s)", flush=True)
+    print(f"Fan Control {VERSION} listening on :{PORT} for {len(SERVERS)} server(s)", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 

@@ -48,11 +48,11 @@ assert [app.curve_speed(curve, t) for t in (20, 40, 60, 90)] == [10, 20, 50, 70]
 base = dict(app.DEFAULT_SETTINGS, curve=curve, failsafe_temp=75, fixed_speed=25)
 assert app.decide({**base, "mode": "curve"}, 60)[:2] == ("manual", 50)
 assert app.decide({**base, "mode": "fixed"}, 60)[:2] == ("manual", 25)
-assert app.decide({**base, "mode": "fixed"}, 75)[::3] == ("dell", True)      # failsafe trips
-assert app.decide({**base, "mode": "fixed"}, 73, True)[::3] == ("dell", True)  # hysteresis holds it
+assert app.decide({**base, "mode": "fixed"}, 75)[::3] == ("auto", True)      # failsafe trips
+assert app.decide({**base, "mode": "fixed"}, 73, True)[::3] == ("auto", True)  # hysteresis holds it
 assert app.decide({**base, "mode": "fixed"}, 72, True)[::3] == ("manual", False)
-assert app.decide({**base, "mode": "curve"}, None)[:2] == ("dell", None)     # no reading
-assert app.decide({**base, "mode": "dell"}, 99)[::3] == ("dell", False)
+assert app.decide({**base, "mode": "curve"}, None)[:2] == ("auto", None)     # no reading
+assert app.decide({**base, "mode": "auto"}, 99)[::3] == ("auto", False)
 
 w = deque()
 assert app.ramped(w, 0, 40, 60) == 40
@@ -79,52 +79,147 @@ for bad in ({"mode": "turbo"}, {"fixed_speed": 101}, {"fixed_speed": "20"}, {"fi
         pass
 
 
-# ---------------------------------------------------------------- per-fan fallback
+# ---------------------------------------------------------------- drivers
 
-class FakeBMC(app.Server):
+import drivers  # noqa: E402
+
+
+class FakeDell(drivers.DellDriver):
     """Refuses the 0xff selector and fan ids above 3, like some 11th-generation BMCs."""
     def __init__(self):
-        super().__init__("fake", "Fake", "10.0.0.1", "root", "x")
+        super().__init__("10.0.0.1", "root", "x")
         self.sent = []
 
     def ipmi(self, *args, timeout=20):
         self.sent.append(args)
         if args[:4] == ("raw", "0x30", "0x30", "0x02") and int(args[4], 16) > 3:
-            raise app.IPMIError("Unable to send RAW command (rsp=0xcc): Invalid data field in request")
+            raise drivers.DriverError("Unable to send RAW command (rsp=0xcc): Invalid data field in request")
         return ""
 
 
-b = FakeBMC()
-b.set_fixed(30)
-assert b.fan_ids == [0, 1, 2, 3]
-b.sent.clear()
-b.set_fixed(40)
-assert b.sent == [("raw", "0x30", "0x30", "0x01", "0x00")] + [("raw", "0x30", "0x30", "0x02", f"0x0{i}", "0x28") for i in range(4)]
+d = FakeDell()
+d.set_speed(30)
+assert d.fan_ids == [0, 1, 2, 3]
+d.sent.clear()
+d.set_speed(40)
+assert d.sent == [("raw", "0x30", "0x30", "0x01", "0x00")] + [("raw", "0x30", "0x30", "0x02", f"0x0{i}", "0x28") for i in range(4)]
 
 
-class DeadBMC(FakeBMC):
+class DeadDell(FakeDell):
     def ipmi(self, *args, timeout=20):
         self.sent.append(args)
         if args[:4] == ("raw", "0x30", "0x30", "0x02"):
-            raise app.IPMIError("rsp=0xcc")
+            raise drivers.DriverError("rsp=0xcc")
         return ""
 
 
-b = DeadBMC()
+d = DeadDell()
 try:
-    b.set_fixed(30)
+    d.set_speed(30)
     raise AssertionError("expected a refusal")
-except app.IPMIError:
-    assert b.sent[-1] == ("raw", "0x30", "0x30", "0x01", "0x01")  # handed back to Dell
+except drivers.DriverError:
+    assert d.sent[-1] == ("raw", "0x30", "0x30", "0x01", "0x01")  # handed back to automatic
+
+
+class FakeSupermicro(drivers.SupermicroDriver):
+    def __init__(self):
+        super().__init__("10.0.0.2", "ADMIN", "x")
+        self.sent = []
+
+    def ipmi(self, *args, timeout=20):
+        self.sent.append(args)
+        return ""
+
+
+d = FakeSupermicro()
+d.set_speed(35)
+assert d.sent == [("raw", "0x30", "0x45", "0x01", "0x01"), ("raw", "0x30", "0x70", "0x66", "0x01", "0x00", "0x23"),
+                  ("raw", "0x30", "0x70", "0x66", "0x01", "0x01", "0x23")]
+d.set_auto()
+assert d.sent[-1] == ("raw", "0x30", "0x45", "0x01", "0x02")
+
+# Redfish as an iLO 4 answers it: FanName / CurrentReading / Units, absent sensors, no exhaust
+ILO_THERMAL = {"Fans": [{"FanName": "Fan 1", "CurrentReading": 23, "Units": "Percent", "Status": {"Health": "OK", "State": "Enabled"}},
+                        {"FanName": "Fan 2", "CurrentReading": 25, "Units": "Percent", "Status": {"Health": "OK", "State": "Enabled"}},
+                        {"FanName": "Fan 7", "CurrentReading": 0, "Units": "Percent", "Status": {"State": "Absent"}}],
+               "Temperatures": [{"Name": "01-Inlet Ambient", "ReadingCelsius": 21, "PhysicalContext": "Intake", "Status": {"Health": "OK", "State": "Enabled"}},
+                                {"Name": "02-CPU 1", "ReadingCelsius": 40, "PhysicalContext": "CPU", "Status": {"Health": "OK", "State": "Enabled"}},
+                                {"Name": "03-CPU 2", "ReadingCelsius": 44, "PhysicalContext": "CPU", "Status": {"Health": "OK", "State": "Enabled"}},
+                                {"Name": "04-P1 DIMM 1-6", "ReadingCelsius": 0, "Status": {"State": "Absent"}},
+                                {"Name": "32-PCI 1", "ReadingCelsius": 60, "PhysicalContext": "SystemBoard", "Status": {"Health": "OK", "State": "Enabled"}}]}
+ILO_POWER = {"PowerControl": [{"PowerConsumedWatts": 118}]}
+
+
+class FakeILO(drivers.ILO4UnlockedDriver):
+    def __init__(self):
+        super().__init__("10.0.0.3", "Administrator", "x")
+        self.ssh_sent = []
+
+    def get(self, path):
+        return {"/redfish/v1/Chassis": {"Members": [{"@odata.id": "/redfish/v1/Chassis/1/"}]},
+                "/redfish/v1/Chassis/1/": {"Thermal": {"@odata.id": "/redfish/v1/Chassis/1/Thermal/"},
+                                           "Power": {"@odata.id": "/redfish/v1/Chassis/1/Power/"}},
+                "/redfish/v1/Systems": {"Members": [{"@odata.id": "/redfish/v1/Systems/1/"}]},
+                "/redfish/v1/Systems/1/": {"Model": "ProLiant DL360 Gen9", "PowerState": "On"},
+                "/redfish/v1/Chassis/1/Thermal/": ILO_THERMAL,
+                "/redfish/v1/Chassis/1/Power/": ILO_POWER}[path]
+
+    def ssh(self, command):
+        self.ssh_sent.append(command)
+        return ""
+
+
+d = FakeILO()
+r = d.read()
+assert d.model == "ProLiant DL360 Gen9" and r["power"] == "on" and r["watts"] == 118
+assert [f["pct"] for f in r["fans"]] == [23, 25] and all(f["rpm"] is None for f in r["fans"])
+assert [t["name"] for t in r["temps"]] == ["01-Inlet Ambient", "CPU 1", "CPU 2", "32-PCI 1"]
+assert (r["inlet"], r["exhaust"]) == (21, None)
+d.set_speed(30)
+assert d.ssh_sent == ["fan p 0 max 77", "fan p 1 max 77"]
+d.set_speed(30)
+assert len(d.ssh_sent) == 2                 # unchanged cap is not re-sent every cycle
+d.set_auto()
+assert d.ssh_sent[-2:] == ["fan p 0 max 255", "fan p 1 max 255"]
+
+# standard Redfish: Name / Reading / ReadingUnits
+_, fans, _ = drivers.parse_redfish({"Fans": [{"Name": "Fan1", "Reading": 5400, "ReadingUnits": "RPM"}]})
+assert fans[0]["rpm"] == 5400 and fans[0]["pct"] is None
+assert drivers.bare_host("[fe80::1]:443") == "fe80::1" and drivers.bare_host("10.0.0.5:8443") == "10.0.0.5"
 
 # ---------------------------------------------------------------- configuration
 
-assert list(app.load_servers({}).keys()) == ["local"]
-srv = app.load_servers({"IDRAC_HOST": "10.0.0.5", "IDRAC_NAME": "R720"})
-assert list(srv) == ["r720"] and srv["r720"].settings_file.name == "settings.json"  # earlier versions' file
-srv = app.load_servers({"IDRAC_2_HOST": "b", "IDRAC_1_HOST": "a", "IDRAC_1_NAME": "Same", "IDRAC_2_NAME": "Same"})
-assert list(srv) == ["same", "same-2"] and srv["same-2"].host == "b"
-assert list(app.SERVERS) == ["rack-a", "rack-b"]
+assert app.env_servers({}) == []
+srv = app.env_servers({"IDRAC_HOST": "10.0.0.5", "IDRAC_NAME": "R720"})
+assert srv[0]["id"] == "r720" and srv[0]["driver"] == "dell" and srv[0]["legacy"]   # keeps 1.0's settings.json
+srv = app.env_servers({"IDRAC_2_HOST": "b", "IDRAC_1_HOST": "a", "IDRAC_1_NAME": "Same", "IDRAC_2_NAME": "Same",
+                       "IDRAC_2_DRIVER": "redfish"})
+assert [s["id"] for s in srv] == ["same", "same-2"] and srv[1]["host"] == "b" and srv[1]["driver"] == "redfish"
+assert app.env_servers({"IDRAC_1_HOST": "x", "IDRAC_1_DRIVER": "bogus"}) == []
+assert list(app.SERVERS) == ["rack-a", "rack-b"] and app.SERVERS["rack-a"].driver.kind == "demo"
+
+ok = app.validate_server({"name": "DL360", "driver": "redfish", "host": "10.0.0.9", "username": "Administrator", "password": "pw"})
+assert ok["password"] == "pw" and ok["verify_tls"] is False
+assert app.validate_server({"name": "Renamed"}, ok)["password"] == "pw"        # edit keeps the password
+assert app.validate_server({"name": "Demo", "driver": "demo"})["host"] == ""
+for bad in ({"name": "", "driver": "dell", "host": "h", "username": "u", "password": "p"},
+            {"name": "x", "driver": "nope", "host": "h", "username": "u", "password": "p"},
+            {"name": "x", "driver": "dell", "host": "h:623", "username": "u", "password": "p"},
+            {"name": "x", "driver": "redfish", "host": "https://h/x", "username": "u", "password": "p"},
+            {"name": "x", "driver": "redfish", "host": "local", "username": "u", "password": "p"},
+            {"name": "x", "driver": "dell", "host": "h", "username": "u"},
+            {"name": "x", "driver": "dell", "host": "h", "username": "", "password": "p"},
+            {"name": "x", "driver": "redfish", "host": "h", "username": "u", "password": "p", "verify_tls": "yes"}):
+    try:
+        app.validate_server(bad)
+        raise AssertionError(f"accepted {bad}")
+    except ValueError:
+        pass
+
+# 1.x settings files said "dell" for automatic mode
+app.write_json(app.SERVERS["rack-a"].settings_file, {"mode": "dell"})
+assert app.SERVERS["rack-a"].settings()["mode"] == "auto"
+app.SERVERS["rack-a"].settings_file.unlink()
 
 # ---------------------------------------------------------------- sessions
 
@@ -141,7 +236,7 @@ assert not app.valid_token(key, "x.é")                                # non-ASC
 a = app.SERVERS["rack-a"]
 a.cycle()
 a.save_history()
-copy = app.Server("rack-a", "Rack A", "demo", "", "")
+copy = app.Server({"id": "rack-a", "name": "Rack A", "driver": "demo"})
 assert copy.load_history() and copy.history[-1]["t"] == a.history[-1]["t"]
 app.SERVERS["rack-b"].cycle()
 
@@ -217,7 +312,7 @@ assert "Secure" in req("POST", "/api/login", {"password": "hunter2"}, {"X-Forwar
 
 st, _, data = req("GET", "/api/state?server=rack-b", headers=cookie)
 d = json.loads(data)
-assert st == 200 and d["id"] == "rack-b" and [x["id"] for x in d["servers"]] == ["rack-a", "rack-b"]
+assert st == 200 and d["id"] == "rack-b" and d["driver"] == "demo" and d["control"] is True
 assert "password" not in data.decode().lower()                        # credentials never leave the server
 assert req("GET", "/api/state?server=nope", headers=cookie)[0] == 404
 
@@ -249,9 +344,43 @@ assert req("POST", "/api/settings?token=e-token", {"mode": "dell"})[0] == 401
 assert req("GET", "/metrics")[0] == 401
 st, _, data = req("GET", "/metrics", headers={"Authorization": "Bearer m-token"})
 text = data.decode()
-assert st == 200 and 'idrac_up{server="rack-a",name="Rack A"} 1' in text
-assert 'idrac_fan_rpm{server="rack-a",name="Rack A",fan="Fan1"}' in text
+assert st == 200 and 'idrac_up{server="rack-a",name="Rack A",driver="demo"} 1' in text
+assert 'idrac_fan_rpm{server="rack-a",name="Rack A",driver="demo",fan="Fan1"}' in text
 assert "idrac_last_update_timestamp_seconds" in text and "e+" not in text
+
+# servers managed in the dashboard
+st, _, data = req("GET", "/api/overview", headers=cookie)
+ov = json.loads(data)
+assert st == 200 and [x["id"] for x in ov["servers"]] == ["rack-a", "rack-b"]
+assert {"dell", "supermicro", "ilo4-unlocked", "redfish", "ipmi", "demo"} == {x["kind"] for x in ov["drivers"]}
+assert "spark" in ov["servers"][0] and "password" not in data.decode().lower().replace("has_password", "")
+assert req("GET", "/api/overview?token=e-token")[0] == 401
+st, _, data = req("GET", "/api/integrations", headers=cookie)
+ig = json.loads(data)
+assert st == 200 and ig["metrics_token"] is True and ig["embed_token"] is True and "m-token" not in data.decode()
+assert "e-token" not in data.decode() and req("GET", "/api/integrations?token=e-token")[0] == 401
+st, _, data = req("GET", "/api/metrics-preview", headers=cookie)
+assert st == 200 and b"idrac_up" in data and req("GET", "/api/metrics-preview")[0] == 401
+assert req("GET", "/static/grafana.json")[0] == 200
+st, _, data = req("POST", "/api/servers/test", {"name": "T", "driver": "demo"}, cookie)
+assert st == 200 and json.loads(data)["ok"] is True and json.loads(data)["fans"] == 6
+st, _, data = req("POST", "/api/servers/test", {"name": "T", "driver": "redfish", "host": "nope..", "username": "u", "password": "p"}, cookie)
+assert st == 400
+st, _, data = req("POST", "/api/servers", {"name": "Lab box", "driver": "demo"}, cookie)
+assert st == 201 and json.loads(data)["id"] == "lab-box" and "lab-box" in app.SERVERS
+assert json.loads(app.SERVERS_FILE.read_text())[0]["name"] == "Lab box"
+st, _, data = req("POST", "/api/servers", {"name": "Lab box", "driver": "demo"}, cookie)
+assert json.loads(data)["id"] == "lab-box-2"
+st, _, data = req("POST", "/api/servers/lab-box", {"name": "Lab box", "driver": "redfish", "host": "10.9.9.9",
+                                                   "username": "admin", "password": "s3cret"}, cookie)
+assert st == 200 and app.SERVERS["lab-box"].driver.kind == "redfish"
+st, _, data = req("GET", "/api/servers/lab-box", headers=cookie)
+assert json.loads(data)["has_password"] is True and "s3cret" not in data.decode()
+assert req("POST", "/api/servers/rack-a", {"name": "x"}, cookie)[0] == 409      # environment servers are read-only
+assert req("POST", "/api/servers/lab-box/delete", {}, cookie)[0] == 200 and "lab-box" not in app.SERVERS
+assert req("POST", "/api/servers/lab-box-2/delete", {}, cookie)[0] == 200
+assert req("POST", "/api/servers", {"name": "x", "driver": "demo"})[0] == 401
+assert json.loads(app.SERVERS_FILE.read_text()) == []
 
 st, h, _ = req("POST", "/api/logout", {}, cookie)
 assert "Max-Age=0" in h["Set-Cookie"]

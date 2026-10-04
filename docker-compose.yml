@@ -1,19 +1,22 @@
 services:
-  idrac-fan-control:
+  fan-control:
     image: ghcr.io/st-devpt/idrac-fan-control:latest
-    container_name: idrac-fan-control
+    container_name: fan-control
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
       - ./data:/data              # owned by uid 1000: mkdir data && chown 1000:1000 data
     environment:
-      IDRAC_HOST: 192.168.1.120   # iDRAC IP or hostname, "local", or "demo"
-      IDRAC_USERNAME: root
-      IDRAC_PASSWORD: calvin
       WEB_PASSWORD: change-me     # dashboard password; leave empty to disable sign-in
       CHECK_INTERVAL: 15          # seconds between readings (minimum 5)
-      # DISCORD_WEBHOOK_URL: https://discord.com/api/webhooks/...
+      # Servers are added in the dashboard. They can also be declared here, which makes
+      # them read-only in the dashboard:
+      # IDRAC_1_NAME: Rack A
+      # IDRAC_1_DRIVER: dell      # dell, supermicro, ilo4-unlocked, redfish, ipmi or demo
+      # IDRAC_1_HOST: 192.168.1.120
+      # IDRAC_1_USERNAME: root
+      # IDRAC_1_PASSWORD: calvin
       # METRICS_TOKEN: a-long-random-string   # Prometheus: Authorization: Bearer <token>
       # EMBED_TOKEN: another-random-string    # read-only widget for Homarr and similar
     read_only: true
