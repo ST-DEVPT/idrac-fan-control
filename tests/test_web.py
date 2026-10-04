@@ -282,3 +282,18 @@ class Backup(Base):
         st, h, _ = self.req("POST", "/api/login", {"password": "lookonly"})
         viewer = {"Cookie": h["Set-Cookie"].split(";")[0]}
         self.assertEqual(self.req("GET", "/api/export", headers=viewer)[0], 403)
+
+
+class Scan(Base):
+    def test_scan_endpoint(self):
+        from fanctl import drivers
+        real = drivers.probe
+        drivers.probe = lambda h: {"host": h, "redfish": False, "ipmi": True, "vendor": "", "product": "",
+                                   "firmware": "", "suggested": "ipmi", "note": ""} if h == "10.0.0.2" else None
+        try:
+            st, _, data = self.post("/api/servers/scan", {"range": "10.0.0.0/30"})
+        finally:
+            drivers.probe = real
+        self.assertEqual((st, [f["host"] for f in json.loads(data)["found"]]), (200, ["10.0.0.2"]))
+        self.assertEqual(self.post("/api/servers/scan", {"range": "1.1.1.0/24"})[0], 400)
+        self.assertEqual(self.req("POST", "/api/servers/scan", {"range": "10.0.0.0/30"})[0], 401)

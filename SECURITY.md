@@ -36,6 +36,9 @@ It is not meant to be exposed to the internet.
   through a shell. Redfish requests refuse redirects, so the `Authorization` header cannot be sent to another
   host. "Test connection" lets a signed-in user make the container contact an address of their choice,
   which is the point of the feature: keep sign-in enabled.
+- **Network scan**: only an admin can run it, only on private ranges and at most 1024 addresses at a time.
+  It sends one HTTPS request (`/redfish/v1`, no credentials) and one IPMI capabilities probe (UDP 623, no
+  credentials) to each address.
 - **TLS to BMCs**: certificates are not verified by default, because BMCs ship self-signed ones. Turn on
   verification per server when the BMC has a trusted certificate.
 - **Input**: settings are validated by type and range; request bodies are capped at 10 kB and

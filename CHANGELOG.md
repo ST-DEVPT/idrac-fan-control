@@ -24,7 +24,8 @@
 - **Quiet hours**: cap the fan speed between two times of day (`TZ` sets the time zone).
 - **History for 24 hours and 7 days**, as 5-minute averages kept on disk.
 - Curve presets (quiet, balanced, cool, storage) and copying the curve of another server.
-- **Detect**: the BMC is asked for its vendor and firmware, and the right server type is suggested.
+- **Network discovery**: scan a private range for BMCs answering Redfish (HTTPS) or IPMI (UDP 623), with the
+  suggested type for each, then add them in a click. **Detect** asks a single BMC for its vendor and firmware.
 - **Read-only account** with `VIEW_PASSWORD`; changes are attributed in the event log; failed sign-ins are
   limited per address (`TRUST_PROXY` to believe `X-Forwarded-For`).
 - **Backup**: export and import servers, settings and Discord, with passwords only when asked for.

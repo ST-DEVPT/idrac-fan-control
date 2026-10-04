@@ -578,6 +578,7 @@ async function openEditor() {
   $("#e-result").hidden = true;
   $("#d-result").hidden = true;
   $("#d-form").reset();
+  $("#sc-range").placeholder = guessRange() || "192.168.1.0/24";
   $("#e-form").reset();
   if (route.id) {
     const r = await api("/api/servers/" + encodeURIComponent(route.id));
@@ -593,7 +594,8 @@ async function openEditor() {
   $("#e-lede").textContent = editing ? "Change how to reach the management controller. Leave the password empty to keep the saved one."
     : "Choose what you have, enter how to reach its management controller, and test the connection.";
   $("#e-delete").hidden = !editing;
-  $("#d-form").hidden = !!editing;
+  $("#d-form").hidden = $("#sc-form").hidden = !!editing;
+  if (editing) $("#sc-results").hidden = true;
   $("#e-cancel").href = editing ? "#/server/" + encodeURIComponent(editing.id) : "#/";
   renderEditor();
 }
@@ -612,6 +614,55 @@ function renderEditor() {
   $("#e-pass").placeholder = editing?.has_password ? "Saved. Type to change" : "";
   if (!$("#e-name").value && !editing) $("#e-name").placeholder = d.kind === "demo" ? "Demo server" : "Rack A";
 }
+
+// a guess at the LAN range, from the address this page was opened on
+function guessRange() {
+  const m = location.hostname.match(/^(10|192\.168|172\.(1[6-9]|2\d|3[01]))\.(\d+)\.(\d+)\.?(\d+)?$/);
+  const parts = location.hostname.split(".");
+  return m && parts.length === 4 ? `${parts[0]}.${parts[1]}.${parts[2]}.0/24` : "";
+}
+
+$("#sc-form").onsubmit = async e => {
+  e.preventDefault();
+  const range = $("#sc-range").value.trim() || $("#sc-range").placeholder;
+  const box = $("#sc-results");
+  box.hidden = false;
+  box.innerHTML = `<p class="hint">Scanning ${esc(range)}… a /24 takes about 15 seconds.</p>`;
+  $("#sc-go").disabled = true;
+  try {
+    const r = await api("/api/servers/scan", { range });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    box.innerHTML = d.found.length ? `<table class="scan-table"><thead><tr><th>Address</th><th>BMC</th><th>Answers</th><th>Suggested</th><th></th></tr></thead><tbody>` +
+      d.found.map(f => {
+        const drv = overview.drivers.find(x => x.kind === f.suggested);
+        return `<tr><td class="mono">${esc(f.host)}</td>
+          <td>${esc([f.vendor, f.product].filter(Boolean).join(" · ") || "Unknown")}${f.firmware ? ` <span class="muted">${esc(f.firmware)}</span>` : ""}</td>
+          <td>${[f.redfish && "Redfish", f.ipmi && "IPMI"].filter(Boolean).join(", ")}</td>
+          <td>${esc(drv ? drv.label : "—")}</td>
+          <td class="r">${f.added ? '<span class="muted">Added</span>' :
+            `<button class="inline-btn" data-host="${esc(f.host)}" data-kind="${esc(f.suggested || "")}" data-note="${esc(f.note)}">Use</button>`}</td></tr>`;
+      }).join("") + "</tbody></table>"
+      : `<p class="hint">No BMC answered in ${esc(range)}. Check the range, and that the container can reach that network.</p>`;
+  } catch (err) {
+    box.innerHTML = `<p class="result bad">${esc(err.message)}</p>`;
+  }
+  $("#sc-go").disabled = false;
+};
+$("#sc-results").addEventListener("click", e => {
+  const b = e.target.closest("button[data-host]");
+  if (!b) return;
+  editDriver = b.dataset.kind;
+  $("#e-host").value = b.dataset.host;
+  $("#d-host").value = b.dataset.host;
+  const res = $("#d-result");
+  res.hidden = !b.dataset.note;
+  res.className = "result ok";
+  res.textContent = b.dataset.note;
+  renderEditor();
+  $("#e-step2").scrollIntoView({ behavior: "smooth", block: "start" });
+  $("#e-name").focus({ preventScroll: true });
+});
 
 $("#d-form").onsubmit = async e => {
   e.preventDefault();

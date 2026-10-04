@@ -562,3 +562,10 @@ body.viewer #control-body, body.viewer .alerts .al-grid, body.viewer .detect { p
 .prefs { display: inline-flex; gap: 4px; }
 .prefs select { padding: 1px 4px; border: 1px solid var(--rule-2); border-radius: 4px; background: transparent; color: var(--ink-2); font: 11.5px var(--sans); }
 .side-foot { flex-wrap: wrap; }
+
+/* network scan */
+.scan { margin-bottom: 10px; }
+.scan-results { max-width: 1000px; margin: 0 0 14px; }
+.scan-table { font-size: 13px; }
+.scan-table td { padding: 7px 8px 7px 0; }
+.scan-table .mono { font-size: 12.5px; }

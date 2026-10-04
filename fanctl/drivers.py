@@ -326,6 +326,8 @@ class RedfishDriver(Driver):
     description = "Any Redfish BMC (HPE iLO, Lenovo XCC, recent Supermicro, ...): temperatures, fans and power. Monitoring only."
     monitor_reason = "the vendor firmware does not expose fan control"
 
+    timeout = 20
+
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.paths = None  # discovered once: thermal, power, system
@@ -341,7 +343,7 @@ class RedfishDriver(Driver):
             "Authorization": f"Basic {token}", "Accept": "application/json", "OData-Version": "4.0"})
         opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx), NoRedirect)
         try:
-            with opener.open(req, timeout=20) as r:
+            with opener.open(req, timeout=self.timeout) as r:
                 return json.loads(r.read(5_000_000))
         except urllib.error.HTTPError as e:
             raise DriverError(f"Redfish {path}: HTTP {e.code} {e.reason}"
@@ -518,6 +520,19 @@ def suggest(vendor, product, firmware):
     return None, "The BMC did not say who made it."
 
 
+def describe_root(root):
+    """Vendor, product and firmware from a Redfish service root, which BMCs serve without a password."""
+    oem = root.get("Oem") or {}
+    vendor = root.get("Vendor") or next((k for k in oem if k not in ("@odata.type",)), "")
+    product = root.get("Product") or ""
+    firmware = ""
+    hp = oem.get("Hpe") or oem.get("Hp") or {}
+    if hp.get("Manager"):
+        product = product or hp["Manager"][0].get("ManagerType", "")
+        firmware = hp["Manager"][0].get("ManagerFirmwareVersion", "")
+    return vendor, product, firmware
+
+
 def detect(host, username="", password="", verify_tls=False):
     """Ask a BMC what it is: Redfish service root first (it needs no password), then IPMI."""
     rf = RedfishDriver(host, username, password, verify_tls)
@@ -526,14 +541,7 @@ def detect(host, username="", password="", verify_tls=False):
     except DriverError as e:
         root, rf_error = None, str(e)
     if root:
-        oem = root.get("Oem") or {}
-        vendor = root.get("Vendor") or next((k for k in oem if k not in ("@odata.type",)), "")
-        product = root.get("Product") or ""
-        firmware = ""
-        hp = oem.get("Hpe") or oem.get("Hp") or {}
-        if hp.get("Manager"):
-            product = product or hp["Manager"][0].get("ManagerType", "")
-            firmware = hp["Manager"][0].get("ManagerFirmwareVersion", "")
+        vendor, product, firmware = describe_root(root)
         if username and password and not firmware:
             try:
                 manager = rf.get(rf.get("/redfish/v1/Managers")["Members"][0]["@odata.id"])
@@ -559,3 +567,71 @@ def detect(host, username="", password="", verify_tls=False):
         return {"found": True, "via": "IPMI", "vendor": vendor, "product": "", "firmware": fw.group(1) if fw else "",
                 "suggested": kind, "note": note}
     return {"found": False, "error": f"No Redfish answer ({rf_error}). Enter the user and password to try IPMI."}
+
+
+# ---------------------------------------------------------------- network discovery
+
+# IPMI "Get Channel Authentication Capabilities" over RMCP, outside any session: every IPMI 1.5/2.0
+# BMC answers it, without credentials. Same probe nmap's ipmi-version uses.
+IPMI_PROBE = bytes.fromhex("0600ff07000000000000000000092018c88100388e04b5")
+SCAN_LIMIT = 1024  # addresses per scan: a /22
+
+
+def scan_targets(cidr):
+    """The host addresses of a private range, refusing public ones: scanning someone else's network
+    is not what this is for."""
+    import ipaddress
+    net = ipaddress.ip_network(cidr.strip(), strict=False)
+    if not (net.is_private or net.is_link_local) or net.is_loopback:
+        raise ValueError("only private ranges can be scanned, e.g. 192.168.1.0/24")
+    if net.num_addresses > SCAN_LIMIT + 2:
+        raise ValueError(f"at most {SCAN_LIMIT} addresses at a time (a /22)")
+    hosts = list(net.hosts()) or [net.network_address]
+    return [str(h) for h in hosts]
+
+
+def probe_ipmi(host, timeout=1.5, port=623):
+    import socket
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_DGRAM) as s:
+        s.settimeout(timeout)
+        try:
+            s.sendto(IPMI_PROBE, (host, port))
+            data, _ = s.recvfrom(512)
+        except OSError:
+            return False
+    return data[:4] == b"\x06\x00\xff\x07"
+
+
+def probe_redfish(host, timeout=2):
+    rf = RedfishDriver(host)
+    rf.timeout = timeout
+    try:
+        root = rf.get("/redfish/v1")
+    except DriverError:
+        return None
+    return root if isinstance(root, dict) and ("RedfishVersion" in root or "Systems" in root or "Oem" in root) else None
+
+
+def probe(host):
+    """What answers at this address: a Redfish BMC, an IPMI BMC, both or nothing."""
+    root, ipmi = probe_redfish(host), probe_ipmi(host)
+    if root is None and not ipmi:
+        return None
+    vendor, product, firmware = describe_root(root) if root else ("", "", "")
+    kind, note = suggest(vendor, product, firmware) if root else ("ipmi", "")
+    if kind == "redfish" and not root:
+        kind = "ipmi"
+    if not root:
+        note = ("Answers IPMI only. Add it with the user and password, then Detect tells which vendor it is.")
+    return {"host": host, "redfish": root is not None, "ipmi": ipmi, "vendor": vendor, "product": product,
+            "firmware": firmware, "suggested": kind, "note": note}
+
+
+def scan(cidr, workers=64):
+    """Probe a range in parallel. A /24 takes a few seconds: unanswered probes time out together."""
+    from concurrent.futures import ThreadPoolExecutor
+    hosts = scan_targets(cidr)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        found = [r for r in pool.map(probe, hosts) if r]
+    return found

@@ -74,6 +74,11 @@ const PT = {
   // add / edit
   "Hardware": "Hardware", "Connection": "Ligação", "Name": "Nome", "Address": "Endereço", "User": "Utilizador", "Password": "Palavra-passe",
   "Not sure? Let the BMC tell you.": "Não tem a certeza? Pergunte ao BMC.", "Detect": "Detetar",
+  "Find BMCs on your network.": "Procure BMCs na sua rede.", "Scan network": "Procurar na rede", "Network range to scan": "Gama de rede a procurar",
+  "Answers": "Responde a", "Suggested": "Sugestão", "Use": "Usar", "Added": "Adicionado", "Unknown": "Desconhecido",
+  "Pick the hardware you have, or": "Escolha o hardware que tem, ou", "scan your network": "procure na sua rede",
+  "for BMCs. Dell iDRAC and Supermicro get full fan control; HPE iLO and other Redfish or IPMI servers are monitored, with history, alerts and Grafana.":
+    "BMCs. Dell iDRAC e Supermicro têm controlo total das ventoinhas; HPE iLO e outros servidores Redfish ou IPMI são monitorizados, com histórico, alertas e Grafana.",
   "BMC address": "Endereço do BMC", "user (optional)": "utilizador (opcional)", "password (optional)": "palavra-passe (opcional)",
   "Verify the TLS certificate": "Verificar o certificado TLS",
   "(leave off for the self-signed certificates BMCs ship with)": "(deixe desligado para os certificados autoassinados que os BMCs trazem)",
@@ -177,6 +182,8 @@ const PT_PATTERNS = [
   [/^Fixed · (.+)$/, "Fixa · $1"], [/^Curve · (.+)$/, "Curva · $1"], [/^Smart · (.+)$/, "Smart · $1"],
   [/^Unreachable: (.+)$/, "Inacessível: $1"], [/^Edit (.+)$/, "Editar $1"],
   [/^Now (.+) · (.+)$/, "Agora $1 · $2"],
+  [/^Scanning (.+)… a \/24 takes about 15 seconds\.$/, "A procurar em $1… uma /24 demora cerca de 15 segundos."],
+  [/^No BMC answered in (.+)\. Check the range, and that the container can reach that network\.$/, "Nenhum BMC respondeu em $1. Confirme a gama e se o contentor chega a essa rede."],
   // reasons and events written by the server
   [/^[Cc]urve at (.+)$/, "curva a $1"], [/^[Ff]ixed speed$/, "velocidade fixa"], [/^[Aa]utomatic mode selected$/, "modo automático escolhido"],
   [/^[Mm]onitoring only$/, "só monitorização"], [/^[Nn]o CPU temperature reading$/, "sem leitura de temperatura do CPU"],

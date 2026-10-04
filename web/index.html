@@ -50,8 +50,8 @@
   <div class="fleet" id="fleet"></div>
   <div class="welcome" id="welcome" hidden>
     <h2>Add your first server</h2>
-    <p>Pick the hardware you have. Dell iDRAC and Supermicro get full fan control; HPE iLO and other
-      Redfish or IPMI servers are monitored, with history, alerts and Grafana.</p>
+    <p>Pick the hardware you have, or <a href="#/add">scan your network</a> for BMCs. Dell iDRAC and Supermicro get
+      full fan control; HPE iLO and other Redfish or IPMI servers are monitored, with history, alerts and Grafana.</p>
     <div class="tiles" id="welcome-tiles"></div>
   </div>
 </section>
@@ -239,6 +239,12 @@
   <ol class="steps">
     <li>
       <h2><span class="n">1</span> Hardware</h2>
+      <form class="detect scan" id="sc-form" autocomplete="off">
+        <span class="detect-lead">Find BMCs on your network.</span>
+        <input id="sc-range" placeholder="192.168.1.0/24" spellcheck="false" aria-label="Network range to scan">
+        <button class="btn" id="sc-go">Scan network</button>
+      </form>
+      <div class="scan-results" id="sc-results" hidden></div>
       <form class="detect" id="d-form" autocomplete="off">
         <span class="detect-lead">Not sure? Let the BMC tell you.</span>
         <input id="d-host" placeholder="BMC address" spellcheck="false" aria-label="BMC address">

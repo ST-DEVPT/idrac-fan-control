@@ -15,7 +15,7 @@ from .alerts import (ALERT_KINDS, SAMPLE, alert_config, build_payload, build_rep
                      public_alert_config, save_alerts, validate_alerts, webhook_of)
 from .config import DATA_DIR, EMBED_TOKEN, INTERVAL, METRICS_TOKEN, VERSION, WEB
 from .control import validate_settings
-from .drivers import DRIVERS, DriverError, detect
+from .drivers import DRIVERS, DriverError, detect, scan
 from .server import SERVERS, registry_lock, save_dashboard_servers, start, stop, unique_id, validate_server
 
 KEY = b""  # set by app.main() once the data folder is known to be writable
@@ -450,6 +450,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, report)
         if self.route == "/api/servers/test":
             return self.test_server(body)
+        if self.route == "/api/servers/scan":
+            try:
+                found = scan(str(body.get("range", "")))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            known = {s.cfg.get("host", "").split(":")[0].strip("[]") for s in list(SERVERS.values())}
+            for f in found:
+                f["added"] = f["host"] in known
+            print(time.strftime("%H:%M:%S"), f"INFO {self.who()} scanned {body.get('range')}: {len(found)} found", flush=True)
+            return self.send(200, {"found": found})
         if self.route == "/api/servers/detect":
             host = str(body.get("host", "")).strip()
             try:

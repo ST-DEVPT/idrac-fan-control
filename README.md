@@ -16,8 +16,8 @@ everything else.
 
 ## Highlights
 
-- **Every server in one place**: an overview of the rack and a page per server, added from the browser
-  with a connection test, or detected automatically from the BMC.
+- **Every server in one place**: an overview of the rack and a page per server. Scan your network for BMCs,
+  let each one tell its vendor and firmware, test the connection, add it.
 - **Smart mode**: finds the slowest fan speed that holds the CPU at a target and keeps every other sensor
   clear of its limits. Or draw a curve, or pick a fixed speed.
 - **Safe by design**: the BMC takes over on a CPU failsafe, on hot exhaust air, when any sensor nears the
@@ -59,7 +59,8 @@ overview card, history, alerts, reports, metrics and the widget, which is often 
 a server loud: on HPE, a third-party PCIe card or disk the iLO cannot read is the usual cause.
 
 Dell iDRAC 9 from firmware 3.34.34.34, and iDRAC 10, no longer accept fan commands: add them as Redfish.
-Not sure what you have? **Detect** on the *Add server* page asks the BMC and picks the type for you.
+Not sure what you have? **Scan network** and **Detect** on the *Add server* page ask the BMCs and pick the
+type for you. The scan only accepts private ranges, up to a /22, and only an admin can run it.
 
 ## Quick start
 
@@ -79,7 +80,9 @@ docker compose up -d
 
 **2. Open `http://<docker-host>:8080`**, sign in, and choose **Add server**.
 
-**3. Enter the BMC address** and press **Detect**, or pick the hardware yourself. Fill in the user and
+**3. Find your servers**: **Scan network** probes a private range (for example `192.168.1.0/24`) for BMCs
+answering Redfish or IPMI and suggests the type of each; **Use** fills in the form. Or enter one address and
+press **Detect**, or pick the hardware yourself. Fill in the user and
 password and press **Test connection**: it reads the BMC once and shows the model, sensors and power draw
 before anything is saved.
 

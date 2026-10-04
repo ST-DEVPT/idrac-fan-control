@@ -232,3 +232,42 @@ class Detection(unittest.TestCase):
         finally:
             drivers.RedfishDriver.get = real
         self.assertEqual((r["vendor"], r["product"], r["firmware"], r["suggested"]), ("Hp", "iLO 4", "2.77", "redfish"))
+
+
+class Discovery(unittest.TestCase):
+    def test_only_private_ranges(self):
+        self.assertEqual(len(drivers.scan_targets("192.168.1.0/24")), 254)
+        self.assertEqual(drivers.scan_targets("10.0.0.5/32"), ["10.0.0.5"])
+        for bad in ("8.8.8.0/24", "127.0.0.0/30", "10.0.0.0/16", "not a range"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                drivers.scan_targets(bad)
+
+    def test_ipmi_probe(self):
+        import socket
+        import threading
+        bmc = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        bmc.bind(("127.0.0.1", 0))
+
+        def answer():
+            data, addr = bmc.recvfrom(512)
+            if data == drivers.IPMI_PROBE:
+                bmc.sendto(bytes.fromhex("0600ff0700000000000000000010811c6320008e0001d900000000"), addr)
+
+        threading.Thread(target=answer, daemon=True).start()
+        self.assertTrue(drivers.probe_ipmi("127.0.0.1", port=bmc.getsockname()[1]))
+        self.assertFalse(drivers.probe_ipmi("127.0.0.1", timeout=0.3, port=bmc.getsockname()[1]))  # nobody answers now
+        bmc.close()
+
+    def test_probe_and_scan(self):
+        roots = {"10.0.0.1": {"RedfishVersion": "1.0.0", "Oem": {"Hp": {"Manager": [{"ManagerType": "iLO 4", "ManagerFirmwareVersion": "2.77"}]}}},
+                 "10.0.0.2": None}
+        real = drivers.probe_redfish, drivers.probe_ipmi
+        drivers.probe_redfish = lambda host, timeout=2: roots.get(host)
+        drivers.probe_ipmi = lambda host, timeout=1.5, port=623: host in ("10.0.0.1", "10.0.0.2")
+        try:
+            found = drivers.scan("10.0.0.0/29")
+        finally:
+            drivers.probe_redfish, drivers.probe_ipmi = real
+        self.assertEqual([f["host"] for f in found], ["10.0.0.1", "10.0.0.2"])
+        self.assertEqual((found[0]["vendor"], found[0]["suggested"], found[0]["redfish"]), ("Hp", "redfish", True))
+        self.assertEqual((found[1]["suggested"], found[1]["redfish"], found[1]["ipmi"]), ("ipmi", False, True))
