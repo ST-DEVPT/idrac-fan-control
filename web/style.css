@@ -354,4 +354,4 @@ body.embed.solid { background: var(--bg); }
 }
 .dc-fields .wide { grid-column: 1 / -1; }
 .dc-fields strong { color: #f2f3f5; font-weight: 600; }
-.dc-fields code { font: 12px/1 var(--mono); background: #1e1f22; padding: 2px 4px; border-radius: 3px; letter-spacing: -1px; }
+.dc-fields code { font: 13px/1.2 Consolas, Menlo, "DejaVu Sans Mono", monospace; background: #1e1f22; padding: 2px 4px; border-radius: 3px; letter-spacing: -1px; }

@@ -1,3 +1,4 @@
 data/
 .test-data/
 __pycache__/
+*-data/
