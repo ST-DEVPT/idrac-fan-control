@@ -11,7 +11,7 @@ from collections import deque
 
 from .alerts import alert_config, notify
 from .config import DATA_DIR, HISTORY_SECONDS, INTERVAL, SAVE_EVERY, write_json
-from .control import DEFAULT_SETTINGS, curve_speed, decide, ramped, speed_text
+from .control import DEFAULT_SETTINGS, curve_speed, decide, ramped, smart_step, speed_text
 from .drivers import DRIVERS, HOST_RE, DemoDriver, DriverError, RedfishDriver
 
 # ---------------------------------------------------------------- one server
@@ -31,6 +31,7 @@ class Server:
         self.history = deque(maxlen=HISTORY_SECONDS // INTERVAL)
         self.events = deque(maxlen=100)
         self.window = deque()  # (time, target) pairs for the ramp-down delay
+        self.smart = {}        # smart mode controller memory
         self.hot = False       # above the "running hot" alert threshold
         self.saved = time.time()
         self.pcie_applied = None
@@ -124,9 +125,20 @@ class Server:
                 effective, target, reason = "auto", None, "server is powered off"
         else:
             effective, target, reason, failsafe = "monitor", None, "monitoring only", False
+        if effective == "manual" and settings["mode"] == "smart":
+            now = time.time()
+            dt = min(120, now - self.smart.get("t", now - INTERVAL))
+            target, reason = smart_step(self.smart, settings, cpu, sensors, dt)
+            self.smart["t"] = now
+            if target is None:
+                effective, reason = "auto", "smart mode has no temperature to aim at"
+        else:
+            self.smart = {}  # start afresh next time smart mode takes over
         speed = None
         with self.lock:  # save_settings() clears the window from the HTTP thread
-            if effective == "manual":
+            if effective == "manual" and settings["mode"] == "smart":
+                speed = target  # smart mode slows down gently on its own
+            elif effective == "manual":
                 speed = ramped(self.window, time.time(), target, settings["ramp_down_seconds"])
             else:
                 self.window.clear()

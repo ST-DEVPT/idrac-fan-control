@@ -100,7 +100,7 @@
       <div class="monitor-note" id="monitor-note" hidden></div>
       <div id="control-body">
       <div class="seg" role="group" aria-label="Mode">
-        <button data-mode="auto">Automatic</button><button data-mode="fixed">Fixed</button><button data-mode="curve">Curve</button>
+        <button data-mode="auto">Automatic</button><button data-mode="fixed">Fixed</button><button data-mode="curve">Curve</button><button data-mode="smart">Smart</button>
       </div>
 
       <div class="panel" data-panel="auto">
@@ -115,6 +115,15 @@
         <div class="presets">
           <button data-preset="10">10 %</button><button data-preset="20">20 %</button><button data-preset="30">30 %</button><button data-preset="50">50 %</button><button data-preset="75">75 %</button>
         </div>
+      </div>
+      <div class="panel" data-panel="smart">
+        <p class="help">Finds the slowest speed that holds the CPU at the target, and keeps every other sensor clear
+          of its limits. Rises quickly when it has to, falls slowly so you don't hear it hunting.</p>
+        <div class="slider">
+          <input type="range" id="smart-target" min="40" max="85" step="1" aria-label="CPU target temperature">
+          <output id="smart-out">—</output>
+        </div>
+        <p class="help" id="smart-live"></p>
       </div>
       <div class="panel" data-panel="curve">
         <p class="help">Drag the points. Double-click empty space to add a point, or a point to remove it.</p>

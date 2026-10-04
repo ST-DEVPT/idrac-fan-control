@@ -92,3 +92,39 @@ class Protection(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 validate_settings(bad, dict(DEFAULT_SETTINGS))
         self.assertIsNone(validate_settings({"exhaust_limit": None}, dict(DEFAULT_SETTINGS))["exhaust_limit"])
+
+
+class Smart(unittest.TestCase):
+    """Smart mode in a simple thermal model: heat from load, cooling that grows with fan speed."""
+    S = {**DEFAULT_SETTINGS, "mode": "smart", "smart_target": 60, "min_speed": 10, "exhaust_limit": None}
+
+    def run_model(self, load, steps=600, dt=15, start=40.0):
+        from fanctl.control import smart_step
+        temp, memory, speeds = start, {}, []
+        for _ in range(steps):
+            speed, _ = smart_step(memory, self.S, temp, {"temps": []}, dt)
+            for _ in range(dt):
+                temp += 0.01 * (load - (temp - 25) * (0.3 + speed / 25))
+            speeds.append(speed)
+        return temp, speeds
+
+    def test_holds_the_target_under_load(self):
+        temp, speeds = self.run_model(load=60)
+        self.assertAlmostEqual(temp, 60, delta=1.5)
+        self.assertTrue(30 <= speeds[-1] <= 42)
+
+    def test_idles_at_the_floor_without_hunting(self):
+        temp, speeds = self.run_model(load=20)
+        self.assertLess(temp, 60)
+        self.assertEqual(set(speeds[-100:]), {10})
+
+    def test_follows_other_sensors(self):
+        from fanctl.control import smart_errors
+        hot_pcie = {"temps": [{"name": "PCIe 1", "value": 64, "cpu": False, "warn": 75}]}
+        name, err = max(smart_errors(self.S, 50, hot_pcie), key=lambda e: e[1])
+        self.assertEqual((name, err), ("PCIe 1", 2))  # aims at 75 - 5 margin - 8
+
+    def test_validation(self):
+        self.assertEqual(validate_settings({"mode": "smart"}, dict(DEFAULT_SETTINGS))["mode"], "smart")
+        with self.assertRaises(ValueError):
+            validate_settings({"mode": "smart", "smart_target": 74}, dict(DEFAULT_SETTINGS))  # failsafe 75

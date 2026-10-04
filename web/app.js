@@ -298,6 +298,10 @@ function renderControls() {
   $$(".seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === draft.mode));
   $$(".panel").forEach(p => p.classList.toggle("on", p.dataset.panel === draft.mode));
   if (document.activeElement !== $("#fixed")) $("#fixed").value = draft.fixed_speed;
+  if (document.activeElement !== $("#smart-target")) $("#smart-target").value = draft.smart_target;
+  $("#smart-out").innerHTML = `${draft.smart_target}<small> °C</small>`;
+  $("#smart-live").textContent = server?.settings.mode === "smart" && server.effective === "manual"
+    ? `Now ${server.applied_speed} % · ${server.reason.replace(/^smart: /, "")}` : "";
   $("#fixed-out").innerHTML = `${draft.fixed_speed}<small> %</small>`;
   if (document.activeElement !== $("#failsafe")) $("#failsafe").value = draft.failsafe_temp;
   if (document.activeElement !== $("#ramp")) $("#ramp").value = draft.ramp_down_seconds;
@@ -316,6 +320,7 @@ function touch() { dirty = true; renderControls(); }
 
 $$(".seg button").forEach(b => b.onclick = () => { draft.mode = b.dataset.mode; touch(); });
 $("#fixed").oninput = e => { draft.fixed_speed = +e.target.value; touch(); };
+$("#smart-target").oninput = e => { draft.smart_target = +e.target.value; touch(); };
 $$("[data-preset]").forEach(b => b.onclick = () => { draft.fixed_speed = +b.dataset.preset; $("#fixed").value = draft.fixed_speed; touch(); });
 $("#failsafe").oninput = e => { const v = +e.target.value; if (v >= 40 && v <= 100) { draft.failsafe_temp = v; touch(); } };
 $("#ramp").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) && v >= 0 && v <= 600) { draft.ramp_down_seconds = v; touch(); } };

@@ -3,7 +3,7 @@
 from .config import FAILSAFE_HYSTERESIS
 
 DEFAULT_SETTINGS = {
-    "mode": "curve",  # auto | fixed | curve
+    "mode": "curve",  # auto | fixed | curve | smart
     "fixed_speed": 20,
     "curve": [[30, 10], [45, 15], [55, 25], [65, 45], [72, 70]],
     "failsafe_temp": 75,       # at or above this CPU temp, hand control back to the BMC
@@ -14,6 +14,7 @@ DEFAULT_SETTINGS = {
     "bmc_thresholds": True,    # also hand over when any sensor nears the warning threshold the BMC defines
     "threshold_margin": 5,     # how far below that threshold, in °C
     "dry_run": False,          # decide and log, but leave the fans to the BMC
+    "smart_target": 60,        # smart mode: CPU temperature to hold, °C
 }
 
 
@@ -66,6 +67,8 @@ def decide(settings, cpu_temp, was_failsafe=False, sensors=None):
     if why:
         return "auto", None, why, True
     floor = settings.get("min_speed", 0)
+    if settings["mode"] == "smart":
+        return "manual", None, "smart", False  # the speed comes from smart_step(), which keeps state
     if settings["mode"] == "fixed":
         return "manual", max(settings["fixed_speed"], floor), "fixed speed", False
     return "manual", max(curve_speed(settings["curve"], cpu_temp), floor), f"curve at {cpu_temp:.0f}°C", False
@@ -84,8 +87,8 @@ def validate_settings(new, current):
     s = {**current, **{k: v for k, v in new.items() if k in DEFAULT_SETTINGS}}
     if s["mode"] == "dell":
         s["mode"] = "auto"
-    if s["mode"] not in ("auto", "fixed", "curve"):
-        raise ValueError("mode must be auto, fixed or curve")
+    if s["mode"] not in ("auto", "fixed", "curve", "smart"):
+        raise ValueError("mode must be auto, fixed, curve or smart")
     if not (type(s["fixed_speed"]) is int and 0 <= s["fixed_speed"] <= 100):
         raise ValueError("fixed speed must be a whole number from 0 to 100")
     if not (type(s["failsafe_temp"]) in (int, float) and 40 <= s["failsafe_temp"] <= 100):
@@ -106,6 +109,10 @@ def validate_settings(new, current):
         raise ValueError("exhaust limit must be between 30 and 90 °C, or empty to turn it off")
     if not (type(s["threshold_margin"]) in (int, float) and 0 <= s["threshold_margin"] <= 20):
         raise ValueError("threshold margin must be between 0 and 20 °C")
+    if not (type(s["smart_target"]) in (int, float) and 40 <= s["smart_target"] <= 85):
+        raise ValueError("smart target must be between 40 and 85 °C")
+    if s["mode"] == "smart" and s["smart_target"] >= s["failsafe_temp"] - 3:
+        raise ValueError("the smart target must be at least 3 °C below the CPU failsafe")
     for key in ("bmc_thresholds", "dry_run"):
         if type(s[key]) is not bool:
             raise ValueError(f"{key} must be true or false")
@@ -114,3 +121,55 @@ def validate_settings(new, current):
 
 def speed_text(effective, speed):
     return {"auto": "automatic", "monitor": "set by the BMC"}.get(effective) or ("—" if speed is None else f"{speed}%")
+
+
+# ---------------------------------------------------------------- smart mode
+
+SMART_KP = 2.0        # % of fan speed per °C above target, applied at once
+SMART_KI = 0.04       # % per °C per second, accumulated: removes the steady-state error
+SMART_UP = 15         # most the speed may rise in one step, in %
+SMART_DOWN = 0.2      # most it may fall per second, in % (a slow fall is a quiet fall)
+SMART_MIN_CHANGE = 2  # % below which a correction is not worth a change of fan noise
+
+
+def smart_errors(settings, cpu, sensors):
+    """How far each watched temperature is above where smart mode wants it, in °C.
+    The CPU aims at smart_target; the exhaust air and every sensor with a BMC warning
+    threshold aim at 8 °C below the point where the failsafe would trip."""
+    out = []
+    if cpu is not None:
+        out.append(("CPU", cpu - settings["smart_target"]))
+    sensors = sensors or {}
+    if settings.get("exhaust_limit") is not None and sensors.get("exhaust") is not None:
+        out.append(("exhaust", sensors["exhaust"] - (settings["exhaust_limit"] - 8)))
+    if settings.get("bmc_thresholds", True):
+        margin = settings.get("threshold_margin", 5)
+        for t in sensors.get("temps", []):
+            if t.get("warn") and not t["cpu"]:
+                out.append((t["name"], t["value"] - (t["warn"] - margin - 8)))
+    return out
+
+
+def smart_step(memory, settings, cpu, sensors, dt):
+    """One step of a PI controller on the worst error. memory holds the integral and the last
+    output between calls; pass {} to start. Returns (speed, reason)."""
+    errors = smart_errors(settings, cpu, sensors)
+    if not errors:
+        return None, "no temperature to aim at"
+    name, err = max(errors, key=lambda e: e[1])
+    if "e" in memory:  # light smoothing: BMC readings jitter by a degree
+        err = 0.5 * memory["e"] + 0.5 * err
+    memory["e"] = err
+    floor = settings.get("min_speed", 0)
+    last = memory.get("last", max(30, floor))
+    integral = memory.get("i", last - SMART_KP * err)  # start where we are, without a jump
+    # clamping anti-windup: the integral never pushes the output past the floor or 100 %
+    integral = min(100 - SMART_KP * err, max(floor - SMART_KP * err, integral + SMART_KI * err * dt))
+    raw = SMART_KP * err + integral
+    if abs(raw - last) < SMART_MIN_CHANGE and floor < raw < 100:
+        raw = last  # don't chase sensor noise one percent at a time
+    speed = min(raw, last + SMART_UP) if raw > last else max(raw, last - SMART_DOWN * dt)
+    speed = round(min(100, max(floor, speed)))
+    memory.update(i=integral, last=speed)
+    where = f"{name} {err:+.0f} °C from target" if name != "CPU" else f"CPU {cpu:.0f}°C, target {settings['smart_target']}°C"
+    return speed, f"smart: {where}"
