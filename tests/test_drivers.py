@@ -104,6 +104,27 @@ class Parsing(unittest.TestCase):
                          ["10.0.0.5", "10.0.0.5", "fe80::1", "fe80::1", "fe80::1"])
 
 
+class Thresholds(unittest.TestCase):
+    SENSOR = """Inlet Temp       | 23.000     | degrees C  | ok    | na        | -7.000    | 3.000     | 42.000    | 47.000    | na
+Exhaust Temp     | 31.000     | degrees C  | ok    | na        | 3.000     | 8.000     | na        | 75.000    | na
+Temp             | 44.000     | degrees C  | ok    | na        | 3.000     | 8.000     | 85.000    | 90.000    | na
+Temp             | 41.000     | degrees C  | ok    | na        | 3.000     | 8.000     | 86.000    | 90.000    | na
+Fan1 RPM         | 3720.000   | RPM        | ok    | na        | 360.000   | 600.000   | na        | na        | na"""
+
+    def test_ipmi(self):
+        t = drivers.parse_thresholds(self.SENSOR)
+        self.assertEqual(t, {"Inlet Temp": [42.0], "Exhaust Temp": [75.0], "Temp": [85.0, 86.0]})
+        s = parse_sdr(SDR, t)
+        self.assertEqual([x["warn"] for x in s["temps"]], [42.0, 75.0, 85.0, 86.0])  # same-name CPUs keep their order
+
+    def test_redfish(self):
+        temps, _, _ = parse_redfish({"Temperatures": [
+            {"Name": "PCI 1", "ReadingCelsius": 50, "UpperThresholdCritical": 100, "UpperThresholdFatal": 110},
+            {"Name": "Inlet", "ReadingCelsius": 20, "UpperThresholdNonCritical": 42, "UpperThresholdCritical": 47},
+            {"Name": "DIMM", "ReadingCelsius": 30, "UpperThresholdCritical": 0}]})
+        self.assertEqual([t["warn"] for t in temps], [100.0, 42.0, None])
+
+
 class Dell(unittest.TestCase):
     def test_per_fan_fallback(self):
         d = FakeDell()
@@ -128,8 +149,14 @@ class Supermicro(unittest.TestCase):
         self.assertEqual(d.sent, [("raw", "0x30", "0x45", "0x01", "0x01"),
                                   ("raw", "0x30", "0x70", "0x66", "0x01", "0x00", "0x23"),
                                   ("raw", "0x30", "0x70", "0x66", "0x01", "0x01", "0x23")])
+        d.sent.clear()
+        d.set_speed(40)  # Full mode is not switched again on every cycle
+        self.assertEqual(d.sent, [("raw", "0x30", "0x70", "0x66", "0x01", "0x00", "0x28"),
+                                  ("raw", "0x30", "0x70", "0x66", "0x01", "0x01", "0x28")])
         d.set_auto()
         self.assertEqual(d.sent[-1], ("raw", "0x30", "0x45", "0x01", "0x02"))
+        d.set_speed(40)  # after a release, Full mode is needed again
+        self.assertEqual(d.sent[-3], ("raw", "0x30", "0x45", "0x01", "0x01"))
 
 
 class ILO4(unittest.TestCase):

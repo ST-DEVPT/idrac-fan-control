@@ -34,9 +34,12 @@ class Server:
         self.hot = False       # above the "running hot" alert threshold
         self.saved = time.time()
         self.pcie_applied = None
+        self.dry_released = False
+        self.thread = None
+        self.cmd_lock = threading.Lock()  # fan commands vs. release(): never both at once
         self.state = {"sensors": None, "cpu_temp": None, "effective": None, "applied_speed": None,
                       "target_speed": None, "reason": "", "failsafe": False, "error": None,
-                      "updated": None, "power": None, "model": None}
+                      "updated": None, "power": None, "model": None, "dry_run": False}
 
     @property
     def control(self):
@@ -116,7 +119,7 @@ class Server:
         cpu = max(cpus) if cpus else max((t["value"] for t in sensors["temps"]), default=None)
         was_failsafe = self.state["failsafe"]
         if self.control:
-            effective, target, reason, failsafe = decide(settings, cpu, was_failsafe)
+            effective, target, reason, failsafe = decide(settings, cpu, was_failsafe, sensors)
             if power == "off":
                 effective, target, reason = "auto", None, "server is powered off"
         else:
@@ -131,29 +134,44 @@ class Server:
             reason += f", holding {speed}% for ramp-down"
 
         error = None
-        if self.control:
-            try:
-                if effective == "auto":
-                    self.driver.set_auto()
-                else:
-                    self.driver.set_speed(speed)  # re-sent every cycle: a BMC reset silently returns to auto
-            except DriverError as e:
-                error = f"fan command refused: {e}"
-                effective, speed, reason = "auto", None, "the BMC refused the fan command"
-            if self.driver.pcie and settings["pcie_cooling"] is not None and settings["pcie_cooling"] != self.pcie_applied:
+        dry = self.control and settings["dry_run"]
+        with self.cmd_lock:
+            if self.stop.is_set():  # stopped while reading: release() owns the fans now
+                return
+            if dry:
+                # decide as usual, but leave the fans to the BMC: hand them over once, then send nothing
+                if not self.dry_released:
+                    try:
+                        self.driver.set_auto()
+                    except DriverError as e:
+                        self.log(f"Could not hand the fans to the BMC for the dry run: {e}", "error")
+                    self.dry_released = True
+            elif self.control:
+                self.dry_released = False
                 try:
-                    self.driver.set_pcie(settings["pcie_cooling"])
-                    self.log(f"Third-party PCIe cooling response {'enabled' if settings['pcie_cooling'] else 'disabled'}")
+                    if effective == "auto":
+                        self.driver.set_auto()
+                    else:
+                        self.driver.set_speed(speed)  # re-sent every cycle: a BMC reset silently returns to auto
+                except DriverError as e:
+                    error = f"fan command refused: {e}"
+                    effective, speed, reason = "auto", None, "the BMC refused the fan command"
+            pcie = settings["pcie_cooling"]
+            if self.control and not dry and self.driver.pcie and pcie is not None and pcie != self.pcie_applied:
+                try:
+                    self.driver.set_pcie(pcie)
+                    self.log(f"Third-party PCIe cooling response {'enabled' if pcie else 'disabled'}")
                 except DriverError as e:
                     self.log(f"Third-party PCIe cooling command refused: {e}", "error")
-                self.pcie_applied = settings["pcie_cooling"]  # tried once per change, not every cycle
+                self.pcie_applied = pcie  # tried once per change, not every cycle
 
         vals = {"cpu": "—" if cpu is None else f"{cpu:.0f}", "reason": reason, "error": error or "",
                 "speed": speed_text(effective, speed)}
         with self.lock:
             prev = self.state
             if (effective, speed) != (prev["effective"], prev["applied_speed"]) and effective != "monitor":
-                self.log(f"Fans → {'automatic' if effective == 'auto' else f'{speed}%'} ({reason})",
+                self.log(("Dry run: would set fans to " if dry else "Fans → ")
+                         + f"{'automatic' if effective == 'auto' else f'{speed}%'} ({reason})",
                          "warn" if failsafe or error else "info")
             if prev["error"] and not error:
                 self.log("BMC responding again", "info")
@@ -174,7 +192,7 @@ class Server:
                 self.hot = False
             self.state.update(sensors=sensors, cpu_temp=cpu, effective=effective, applied_speed=speed,
                               target_speed=target, reason=reason, failsafe=failsafe, error=error,
-                              updated=time.time(), power=power)
+                              updated=time.time(), power=power, dry_run=dry)
             rpms = [f["rpm"] for f in sensors["fans"] if f["rpm"] is not None]
             pcts = [f["pct"] for f in sensors["fans"] if f["pct"] is not None]
             self.history.append({"t": round(time.time()), "cpu": cpu, "speed": speed,
@@ -186,10 +204,15 @@ class Server:
     def release(self):
         """Hand the fans back to the BMC: on shutdown, removal, or a change of driver."""
         if self.control:
-            try:
-                self.driver.set_auto()
-            except DriverError as e:
-                print(f"[{self.id}] could not restore automatic fan control:", e, file=sys.stderr)
+            with self.cmd_lock:
+                try:
+                    self.driver.set_auto()
+                except DriverError as e:
+                    print(f"[{self.id}] could not restore automatic fan control:", e, file=sys.stderr)
+
+    def start(self):
+        self.thread = threading.Thread(target=self.run, daemon=True, name=self.id)
+        self.thread.start()
 
     def run(self):
         restored = self.load_history()
@@ -218,15 +241,16 @@ class Server:
                 "monitor_reason": d.monitor_reason, "source": self.cfg.get("source", "dashboard")}
 
     def summary(self):
-        s = self.state
         now = time.time()
         with self.lock:
+            s = dict(self.state)
             hour = [p for p in self.history if p["t"] > now - 3600]
         step = max(1, len(hour) // 60)
         fans = (s["sensors"] or {}).get("fans", [])
         return {**self.info(), "model": s["model"], "cpu_temp": s["cpu_temp"], "effective": s["effective"],
                 "mode": self.settings()["mode"],
                 "applied_speed": s["applied_speed"], "failsafe": s["failsafe"], "error": s["error"],
+                "dry_run": s["dry_run"], "reason": s["reason"],
                 "power": s["power"], "updated": s["updated"],
                 "watts": (s["sensors"] or {}).get("watts"), "inlet": (s["sensors"] or {}).get("inlet"),
                 "fan_pct": round(sum(f["pct"] for f in fans if f["pct"] is not None) / max(1, sum(f["pct"] is not None for f in fans)))
@@ -301,13 +325,18 @@ def save_dashboard_servers():
 def start(cfg):
     srv = Server(cfg)
     SERVERS[srv.id] = srv
-    threading.Thread(target=srv.run, daemon=True, name=srv.id).start()
+    srv.start()
     return srv
 
 
 def stop(srv, forget=False):
+    """Stop the control loop and hand the fans back. A loop busy reading a slow BMC is not waited
+    for: cmd_lock and the stop flag guarantee it sends no fan command after release(), so it can
+    never race the replacement loop for the same BMC."""
     srv.stop.set()
     srv.wake.set()
+    if srv.thread and srv.thread is not threading.current_thread():
+        srv.thread.join(timeout=2)
     srv.release()
     srv.save_history()
     SERVERS.pop(srv.id, None)

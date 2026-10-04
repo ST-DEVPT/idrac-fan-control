@@ -67,3 +67,52 @@ class Persistence(unittest.TestCase):
         copy = Server({"id": "rack-a", "name": "Rack A", "driver": "demo"})
         self.assertTrue(copy.load_history())
         self.assertEqual(copy.history[-1]["t"], a.history[-1]["t"])
+
+
+class Recorder(Server):
+    """A demo server whose fan commands are recorded."""
+    def __init__(self, sid):
+        super().__init__({"id": sid, "name": sid, "driver": "demo"})
+        self.calls = []
+        drv = self.driver
+        drv.set_auto = lambda: self.calls.append("auto")
+        drv.set_speed = lambda pct: self.calls.append(pct)
+
+
+class DryRun(unittest.TestCase):
+    def test_decides_but_sends_nothing(self):
+        srv = Recorder("dry")
+        write_json(srv.settings_file, {"mode": "fixed", "fixed_speed": 30, "dry_run": True})
+        srv.cycle()
+        srv.cycle()
+        self.assertEqual(srv.calls, ["auto"])       # handed to the BMC once, then nothing
+        self.assertTrue(srv.state["dry_run"])
+        self.assertEqual(srv.state["applied_speed"], 30)
+        self.assertIn("Dry run: would set fans to 30%", srv.events[0]["msg"])
+        write_json(srv.settings_file, {"mode": "fixed", "fixed_speed": 30})
+        srv.cycle()
+        self.assertEqual(srv.calls, ["auto", 30])
+        srv.settings_file.unlink()
+
+
+class Stopping(unittest.TestCase):
+    def test_no_command_after_release(self):
+        import threading
+        import time as _time
+        srv = Recorder("slow")
+        reading = threading.Event()
+        real_read = srv.driver.read
+
+        def slow_read():
+            reading.set()
+            _time.sleep(1)
+            return real_read()
+
+        srv.driver.read = slow_read
+        t = threading.Thread(target=srv.cycle)
+        t.start()
+        reading.wait()
+        srv.stop.set()
+        srv.release()                 # while the cycle is still reading
+        t.join()
+        self.assertEqual(srv.calls, ["auto"])  # the late cycle sent nothing after the release

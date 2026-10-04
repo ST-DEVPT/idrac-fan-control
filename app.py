@@ -47,7 +47,7 @@ def main():
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
     for srv in list(SERVERS.values()):
-        threading.Thread(target=srv.run, daemon=True, name=srv.id).start()
+        srv.start()
     threading.Thread(target=reporter, args=(SERVERS,), daemon=True, name="reporter").start()
     print(f"Fan Control {config.VERSION} listening on :{config.PORT} for {len(SERVERS)} server(s)", flush=True)
     ThreadingHTTPServer(("0.0.0.0", config.PORT), web.Handler).serve_forever()

@@ -70,7 +70,9 @@ def metrics(servers):
 
     add("fanctl_info", "Build information.", {"version": VERSION}, 1)
     for s in list(servers.values()):
-        st, sens = s.state, s.state["sensors"] or {}
+        with s.lock:
+            st = dict(s.state)
+        sens = st["sensors"] or {}
         lbl = {"server": s.id, "name": s.name, "driver": s.driver.kind}
         add("fanctl_up", "1 if the last BMC reading succeeded.", lbl, 0 if st["error"] or not st["updated"] else 1)
         add("fanctl_last_update_timestamp_seconds", "Unix time of the last reading.", lbl, st["updated"])

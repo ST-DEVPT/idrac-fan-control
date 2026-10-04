@@ -9,7 +9,13 @@ DEFAULT_SETTINGS = {
     "failsafe_temp": 75,       # at or above this CPU temp, hand control back to the BMC
     "ramp_down_seconds": 60,   # fans speed up at once, slow down only after this long
     "pcie_cooling": None,      # None = leave untouched, True/False = enforce
+    "min_speed": 10,           # never run the fans slower than this in manual modes
+    "exhaust_limit": 60,       # °C of exhaust air at which the BMC takes over; None turns it off
+    "bmc_thresholds": True,    # also hand over when any sensor nears the warning threshold the BMC defines
+    "threshold_margin": 5,     # how far below that threshold, in °C
+    "dry_run": False,          # decide and log, but leave the fans to the BMC
 }
+
 
 def curve_speed(curve, temp):
     """Linear interpolation over [[temp, speed], ...]; flat beyond both ends."""
@@ -22,24 +28,47 @@ def curve_speed(curve, temp):
     return pts[-1][1]
 
 
-def decide(settings, cpu_temp, was_failsafe=False):
-    """Return (effective, target_speed, reason, failsafe).
+def hazard(settings, cpu_temp, sensors=None, tripped=False):
+    """Why the BMC must take over, or None.
 
-    Once the failsafe trips, manual control resumes only when the CPU is
-    FAILSAFE_HYSTERESIS degrees below the limit, so the fans don't flap at the edge.
+    Checks the hottest CPU against the failsafe, the exhaust air against its limit, and every
+    sensor against the warning threshold the BMC itself defines (PCIe cards, disks, DIMMs, RAID
+    controller: the parts a CPU-only curve would cook). Once tripped, each limit is lowered by
+    FAILSAFE_HYSTERESIS, so manual control resumes only when things have clearly cooled.
     """
+    def over(value, limit):
+        return value >= limit or (tripped and value > limit - FAILSAFE_HYSTERESIS)
+
+    limit = settings["failsafe_temp"]
+    if cpu_temp is not None and over(cpu_temp, limit):
+        return (f"CPU {cpu_temp:.0f}°C ≥ failsafe {limit}°C" if cpu_temp >= limit
+                else f"CPU {cpu_temp:.0f}°C, resuming below {limit - FAILSAFE_HYSTERESIS}°C")
+    sensors = sensors or {}
+    exhaust, ex_limit = sensors.get("exhaust"), settings.get("exhaust_limit")
+    if ex_limit is not None and exhaust is not None and over(exhaust, ex_limit):
+        return f"exhaust air {exhaust:.0f}°C, limit {ex_limit}°C"
+    if settings.get("bmc_thresholds", True):
+        margin = settings.get("threshold_margin", 5)
+        for t in sensors.get("temps", []):
+            warn = t.get("warn")
+            if warn and over(t["value"], warn - margin):
+                return f"{t['name']} {t['value']:.0f}°C, near its {warn:.0f}°C warning threshold"
+    return None
+
+
+def decide(settings, cpu_temp, was_failsafe=False, sensors=None):
+    """Return (effective, target_speed, reason, failsafe). See hazard() for what trips the failsafe."""
     if settings["mode"] == "auto":
         return "auto", None, "automatic mode selected", False
     if cpu_temp is None:
         return "auto", None, "no CPU temperature reading", False
-    limit = settings["failsafe_temp"]
-    if cpu_temp >= limit:
-        return "auto", None, f"CPU {cpu_temp:.0f}°C ≥ failsafe {limit}°C", True
-    if was_failsafe and cpu_temp > limit - FAILSAFE_HYSTERESIS:
-        return "auto", None, f"CPU {cpu_temp:.0f}°C, resuming below {limit - FAILSAFE_HYSTERESIS}°C", True
+    why = hazard(settings, cpu_temp, sensors, was_failsafe)
+    if why:
+        return "auto", None, why, True
+    floor = settings.get("min_speed", 0)
     if settings["mode"] == "fixed":
-        return "manual", settings["fixed_speed"], "fixed speed", False
-    return "manual", curve_speed(settings["curve"], cpu_temp), f"curve at {cpu_temp:.0f}°C", False
+        return "manual", max(settings["fixed_speed"], floor), "fixed speed", False
+    return "manual", max(curve_speed(settings["curve"], cpu_temp), floor), f"curve at {cpu_temp:.0f}°C", False
 
 
 def ramped(window, now, target, hold):
@@ -71,6 +100,15 @@ def validate_settings(new, current):
     s["curve"] = sorted([round(p[0]), round(p[1])] for p in c)
     if s["pcie_cooling"] not in (None, True, False):
         raise ValueError("pcie_cooling must be null, true or false")
+    if not (type(s["min_speed"]) is int and 0 <= s["min_speed"] <= 60):
+        raise ValueError("minimum speed must be a whole number from 0 to 60")
+    if s["exhaust_limit"] is not None and not (type(s["exhaust_limit"]) in (int, float) and 30 <= s["exhaust_limit"] <= 90):
+        raise ValueError("exhaust limit must be between 30 and 90 °C, or empty to turn it off")
+    if not (type(s["threshold_margin"]) in (int, float) and 0 <= s["threshold_margin"] <= 20):
+        raise ValueError("threshold margin must be between 0 and 20 °C")
+    for key in ("bmc_thresholds", "dry_run"):
+        if type(s[key]) is not bool:
+            raise ValueError(f"{key} must be true or false")
     return s
 
 

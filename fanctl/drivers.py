@@ -60,11 +60,32 @@ def finish(temps, fans, watts=None, power=None):
             "inlet": find(r"inlet|ambient|intake"), "exhaust": find(r"exhaust|outlet")}
 
 
-def parse_sdr(text):
+def parse_thresholds(text):
+    """Warning thresholds from `ipmitool sensor`, as {name: [threshold, ...]} in sensor order (Dell
+    names both CPU sensors "Temp"). Columns: name | value | unit | status | lnr | lcr | lnc | unc | ucr | unr.
+    The upper non-critical threshold is the warning; when a BMC leaves it out, the upper critical one."""
+    out = {}
+    for line in text.splitlines():
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 10 or parts[2] != "degrees C":
+            continue
+        warn = None
+        for col in (parts[7], parts[8]):
+            try:
+                warn = float(col)
+                break
+            except ValueError:
+                pass
+        out.setdefault(parts[0], []).append(warn)
+    return out
+
+
+def parse_sdr(text, thresholds=None):
     """Parse `ipmitool sdr elist full`. Line shape: 'Inlet Temp | 04h | ok | 7.1 | 23 degrees C'.
     Entity 3.x is a processor. Names differ between generations ("Inlet Temp" vs "Ambient Temp",
     "Fan1A RPM" vs "FAN MOD 1A RPM"), so inlet/exhaust are matched by pattern."""
     temps, fans, watts = [], [], None
+    seen = {}
     for line in text.splitlines():
         parts = [p.strip() for p in line.split("|")]
         if len(parts) != 5:
@@ -76,9 +97,11 @@ def parse_sdr(text):
         except ValueError:
             continue  # "No Reading", "Disabled", discrete sensors
         if unit == "degrees C":
+            n = seen[name] = seen.get(name, -1) + 1
+            warns = (thresholds or {}).get(name, [])
             temps.append({"name": name, "entity": entity, "value": value,
                           "cpu": entity.startswith("3.") or bool(re.match(r"CPU\d* Temp", name)),
-                          "ok": status == "ok"})
+                          "ok": status == "ok", "warn": warns[n] if n < len(warns) else None})
         elif unit == "RPM":
             fans.append({"name": re.sub(r"\s*RPM$", "", name), "rpm": int(value), "pct": None, "ok": status == "ok"})
         elif unit == "Watts" and watts is None:
@@ -97,9 +120,12 @@ def parse_redfish(thermal, power=None):
             continue
         name = t.get("Name") or t.get("MemberId") or "Sensor"
         context = t.get("PhysicalContext") or ""
+        # Redfish's NonCritical is the warning level; iLO calls its warning level "Critical"
+        warn = t.get("UpperThresholdNonCritical") or t.get("UpperThresholdCritical")
         temps.append({"name": name, "entity": context, "value": float(value),
                       "cpu": context == "CPU" or bool(re.search(r"\bCPU\s*\d", name)),
-                      "ok": (t.get("Status") or {}).get("Health", "OK") in ("OK", None)})
+                      "ok": (t.get("Status") or {}).get("Health", "OK") in ("OK", None),
+                      "warn": float(warn) if isinstance(warn, (int, float)) and warn > 0 else None})
     for f in thermal.get("Fans", []):
         state = (f.get("Status") or {}).get("State", "Enabled")
         reading = f.get("Reading", f.get("CurrentReading"))
@@ -179,8 +205,15 @@ class IPMIDriver(Driver):
             raise DriverError(f"{msg} ({hint})" if hint else msg)
         return r.stdout
 
+    thresholds = None  # read once: `ipmitool sensor` is slow and thresholds don't change
+
     def read(self):
-        data = parse_sdr(self.ipmi("sdr", "elist", "full"))
+        if self.thresholds is None:
+            try:
+                self.thresholds = parse_thresholds(self.ipmi("sensor", timeout=60))
+            except DriverError:
+                self.thresholds = {}
+        data = parse_sdr(self.ipmi("sdr", "elist", "full"), self.thresholds)
         data["power"] = "on" if "is on" in self.ipmi("chassis", "power", "status") else "off"
         if self.model is None:
             try:
@@ -254,12 +287,23 @@ class SupermicroDriver(IPMIDriver):
     experimental = True
     monitor_reason = ""
 
+    REASSERT = 600  # switch to Full mode again every 10 min, in case the BMC was reset
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.full_since = None
+
     def set_auto(self):
+        self.full_since = None
         self.ipmi("raw", "0x30", "0x45", "0x01", "0x02")  # Optimal mode
 
     def set_speed(self, pct):
         try:
-            self.ipmi("raw", "0x30", "0x45", "0x01", "0x01")  # Full mode, so the BMC stops overriding
+            # Full mode stops the BMC overriding the duty cycle. Switching modes resets the fans on some
+            # boards, so it is sent once (and re-asserted now and then), not on every cycle.
+            if self.full_since is None or time.time() - self.full_since > self.REASSERT:
+                self.ipmi("raw", "0x30", "0x45", "0x01", "0x01")
+                self.full_since = time.time()
             for zone in ("0x00", "0x01"):  # CPU zone, peripheral zone
                 self.ipmi("raw", "0x30", "0x70", "0x66", "0x01", zone, f"0x{pct:02x}")
         except DriverError:
@@ -427,7 +471,7 @@ class DemoDriver(Driver):
                  f"Temp | 0Fh | ok | 3.2 | {cpu - 3:.0f} degrees C",
                  f"Pwr Consumption | 77h | ok | 7.1 | {100 + cpu + random.uniform(-2, 2):.0f} Watts"]
         lines += [f"Fan{i} RPM | 3{i}h | ok | 7.1 | {rpm + random.randint(-60, 60)} RPM" for i in range(1, 7)]
-        data = parse_sdr("\n".join(lines))
+        data = parse_sdr("\n".join(lines), {"Inlet Temp": [42.0], "Exhaust Temp": [70.0], "Temp": [90.0, 90.0]})
         data["power"] = "on"
         return data
 

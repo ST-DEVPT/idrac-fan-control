@@ -38,7 +38,7 @@ function status(x) {
   if (x.failsafe) return { cls: "warn", text: "Failsafe · automatic" };
   if (x.effective === "monitor") return { cls: "ok", text: "Monitoring" };
   if (x.effective === "auto") return { cls: "ok", text: "Automatic" };
-  return { cls: "ok", text: `${x.mode === "fixed" ? "Fixed" : "Curve"} · ${x.applied_speed}%` };
+  return { cls: x.dry_run ? "warn" : "ok", text: `${x.dry_run ? "Dry run · " : ""}${cap(x.mode)} · ${x.applied_speed}%` };
 }
 
 // ---------------------------------------------------------------- router
@@ -202,7 +202,8 @@ function renderServer() {
   $("#link").textContent = s.error ? "BMC error" : stale ? "Waiting for readings" : `Read ${Math.max(0, Math.round(Date.now() / 1000 - s.updated))} s ago`;
   $("#dot-power").className = "dot " + (s.power === "on" ? "ok" : s.power === "off" ? "warn" : "");
   $("#power").textContent = s.power === "on" ? "Powered on" : s.power === "off" ? "Powered off" : "Power —";
-  $("#mode-now").textContent = monitor ? "Monitoring" : auto ? "Automatic" : `${s.settings.mode === "fixed" ? "Fixed" : "Curve"} · ${s.applied_speed} %`;
+  $("#mode-now").textContent = (s.dry_run ? "Dry run · " : "") +
+    (monitor ? "Monitoring" : auto ? "Automatic" : `${cap(s.settings.mode)} · ${s.applied_speed} %`);
 
   const alert = s.error ? ["BMC", s.error] : s.failsafe ? ["Failsafe", `${cap(s.reason)}. The BMC is controlling the fans.`] : null;
   $("#alert").classList.toggle("show", !!alert);
@@ -246,9 +247,14 @@ function renderServer() {
     <td class="r">${f.rpm != null ? f.rpm.toLocaleString() : f.pct}</td></tr>`;
   }).join("") || '<tr class="empty"><td colspan="3">No readings</td></tr>';
   $("#temp-count").textContent = sens.temps.length ? `${sens.temps.length} sensors` : "";
-  $("#temps").innerHTML = sens.temps.map(t => `<tr><td>${esc(t.name)} <span class="mono muted">${esc(t.entity)}</span></td>
-    <td class="bar"><div class="meter"><i class="${t.value >= fs - 5 ? "hot" : "c"}" style="width:${clamp((t.value - T_MIN) / (T_MAX - T_MIN) * 100, 2, 100)}%"></i></div></td>
-    <td class="r">${fmt(t.value)}</td></tr>`).join("") || '<tr class="empty"><td colspan="3">No readings</td></tr>';
+  const pos = v => clamp((v - T_MIN) / (T_MAX - T_MIN) * 100, 2, 100);
+  $("#temps").innerHTML = sens.temps.map(t => {
+    const near = t.warn && t.value >= t.warn - draft.threshold_margin;
+    return `<tr><td>${esc(t.name)} <span class="mono muted">${esc(t.entity)}</span></td>
+    <td class="bar"><div class="meter${t.warn ? " has-warn" : ""}"><i class="${near || (t.cpu && t.value >= fs - 5) ? "hot" : "c"}" style="width:${pos(t.value)}%"></i>
+      ${t.warn ? `<b class="warn-tick" style="left:${pos(t.warn)}%" title="BMC warning at ${fmt(t.warn)} °C"></b>` : ""}</div></td>
+    <td class="r">${fmt(t.value)}${t.warn ? `<small class="muted"> / ${fmt(t.warn)}</small>` : ""}</td></tr>`;
+  }).join("") || '<tr class="empty"><td colspan="3">No readings</td></tr>';
   $("#updated").textContent = `every ${s.interval} s`;
   $("#log").innerHTML = s.events.map(e => `<tr><td>${time(e.t, true)}</td><td class="${e.level}">${esc(e.msg)}</td></tr>`).join("")
     || '<tr class="empty"><td>Nothing yet</td></tr>';
@@ -295,7 +301,12 @@ function renderControls() {
   $("#fixed-out").innerHTML = `${draft.fixed_speed}<small> %</small>`;
   if (document.activeElement !== $("#failsafe")) $("#failsafe").value = draft.failsafe_temp;
   if (document.activeElement !== $("#ramp")) $("#ramp").value = draft.ramp_down_seconds;
-  $$(".mini button").forEach(b => b.setAttribute("aria-pressed", b.dataset.pcie === String(draft.pcie_cooling)));
+  if (document.activeElement !== $("#min-speed")) $("#min-speed").value = draft.min_speed;
+  if (document.activeElement !== $("#exhaust-limit")) $("#exhaust-limit").value = draft.exhaust_limit ?? "";
+  $("#margin-text").textContent = draft.threshold_margin;
+  $$("#bmc-thr button").forEach(b => b.setAttribute("aria-pressed", b.dataset.thr === String(draft.bmc_thresholds)));
+  $$("#dry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.dry === String(draft.dry_run)));
+  $$("[data-pcie]").forEach(b => b.setAttribute("aria-pressed", b.dataset.pcie === String(draft.pcie_cooling)));
   $("#save").disabled = $("#discard").disabled = !dirty;
   $("#save-state").textContent = dirty ? "Unsaved changes" : "No changes";
   $("#save-state").className = "state" + (dirty ? " dirty" : "");
@@ -308,7 +319,14 @@ $("#fixed").oninput = e => { draft.fixed_speed = +e.target.value; touch(); };
 $$("[data-preset]").forEach(b => b.onclick = () => { draft.fixed_speed = +b.dataset.preset; $("#fixed").value = draft.fixed_speed; touch(); });
 $("#failsafe").oninput = e => { const v = +e.target.value; if (v >= 40 && v <= 100) { draft.failsafe_temp = v; touch(); } };
 $("#ramp").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) && v >= 0 && v <= 600) { draft.ramp_down_seconds = v; touch(); } };
-$$(".mini button").forEach(b => b.onclick = () => { draft.pcie_cooling = JSON.parse(b.dataset.pcie); touch(); });
+$$("[data-pcie]").forEach(b => b.onclick = () => { draft.pcie_cooling = JSON.parse(b.dataset.pcie); touch(); });
+$$("[data-thr]").forEach(b => b.onclick = () => { draft.bmc_thresholds = b.dataset.thr === "true"; touch(); });
+$$("[data-dry]").forEach(b => b.onclick = () => { draft.dry_run = b.dataset.dry === "true"; touch(); });
+$("#min-speed").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) && v >= 0 && v <= 60) { draft.min_speed = v; touch(); } };
+$("#exhaust-limit").oninput = e => {
+  const raw = e.target.value.trim(), v = +raw;
+  if (raw === "") { draft.exhaust_limit = null; touch(); } else if (v >= 30 && v <= 90) { draft.exhaust_limit = v; touch(); }
+};
 $("#discard").onclick = () => { dirty = false; draft = structuredClone(server.settings); renderServer(); };
 $("#save").onclick = async () => {
   $("#save").disabled = true;

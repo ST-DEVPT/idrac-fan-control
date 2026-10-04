@@ -55,3 +55,40 @@ class Validation(unittest.TestCase):
                     {"ramp_down_seconds": -1}, {"ramp_down_seconds": 601}, {"ramp_down_seconds": 1.5}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 validate_settings(bad, dict(DEFAULT_SETTINGS))
+
+
+class Protection(unittest.TestCase):
+    """The failsafe looks at every sensor, not only the CPU."""
+    SENSORS = {"exhaust": 40, "temps": [{"name": "CPU 1", "value": 50, "cpu": True, "warn": None},
+                                        {"name": "PCIe 1", "value": 60, "cpu": False, "warn": 70}]}
+
+    def test_exhaust_limit(self):
+        s = {**BASE, "exhaust_limit": 45}
+        hot = {**self.SENSORS, "exhaust": 46}
+        self.assertEqual(decide(s, 50, False, hot)[::3], ("auto", True))
+        self.assertIn("exhaust", decide(s, 50, False, hot)[2])
+        self.assertEqual(decide({**s, "exhaust_limit": None}, 50, False, hot)[0], "manual")
+
+    def test_bmc_warning_thresholds(self):
+        near = {**self.SENSORS, "temps": [dict(self.SENSORS["temps"][1], value=66)]}  # 70 warn - 5 margin
+        self.assertEqual(decide(BASE, 50, False, near)[::3], ("auto", True))
+        self.assertIn("PCIe 1", decide(BASE, 50, False, near)[2])
+        self.assertEqual(decide({**BASE, "bmc_thresholds": False}, 50, False, near)[0], "manual")
+        self.assertEqual(decide({**BASE, "threshold_margin": 2}, 50, False, near)[0], "manual")
+        self.assertEqual(decide(BASE, 50, False, self.SENSORS)[0], "manual")
+
+    def test_hysteresis_for_every_limit(self):
+        s = {**BASE, "exhaust_limit": 45}
+        self.assertEqual(decide(s, 50, True, {**self.SENSORS, "exhaust": 43})[3], True)   # still within 3 °C
+        self.assertEqual(decide(s, 50, True, {**self.SENSORS, "exhaust": 42})[3], False)
+
+    def test_minimum_speed(self):
+        self.assertEqual(decide({**BASE, "mode": "fixed", "fixed_speed": 5, "min_speed": 12}, 40)[1], 12)
+        self.assertEqual(decide({**BASE, "mode": "curve", "min_speed": 15}, 20)[1], 15)
+
+    def test_new_settings_are_validated(self):
+        for bad in ({"min_speed": 70}, {"exhaust_limit": 10}, {"threshold_margin": 50},
+                    {"bmc_thresholds": "yes"}, {"dry_run": 1}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_settings(bad, dict(DEFAULT_SETTINGS))
+        self.assertIsNone(validate_settings({"exhaust_limit": None}, dict(DEFAULT_SETTINGS))["exhaust_limit"])
