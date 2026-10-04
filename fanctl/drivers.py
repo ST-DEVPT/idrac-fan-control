@@ -486,3 +486,76 @@ class DemoDriver(Driver):
 
 
 DRIVERS = {d.kind: d for d in (DellDriver, SupermicroDriver, ILO4UnlockedDriver, RedfishDriver, IPMIDriver, DemoDriver)}
+
+
+# ---------------------------------------------------------------- detection
+
+IPMI_VENDORS = {674: "Dell", 10876: "Supermicro", 11: "HPE", 47196: "HPE", 19046: "Lenovo", 2: "IBM"}
+
+
+def version_tuple(text):
+    return tuple(int(x) for x in re.findall(r"\d+", text or "")[:4])
+
+
+def suggest(vendor, product, firmware):
+    """Which driver to use for what the BMC said about itself, and why."""
+    text = f"{vendor} {product}".lower()
+    if "dell" in text or "idrac" in text:
+        v = version_tuple(firmware)
+        if v and v >= (3, 34):
+            return "redfish", (f"iDRAC firmware {firmware} no longer accepts fan commands (removed from 3.34.34.34), "
+                               "so this server can be monitored only.")
+        return "dell", "Dell iDRAC: full fan control over IPMI." + (f" Firmware {firmware}." if firmware else "")
+    if "supermicro" in text:
+        return "supermicro", "Supermicro BMC: fan control is experimental; try it with Dry run first."
+    if "hp" in text.split() or "hpe" in text or "ilo" in text:
+        if "ilo 4" in text or "ilo4" in text:
+            return "redfish", ("HPE iLO 4: monitored over Redfish. If you flashed the community-unlocked 2.77 firmware, "
+                               "choose \"HPE iLO 4 with unlocked firmware\" instead.")
+        return "redfish", "HPE iLO: monitored over Redfish; HPE firmware does not allow fan control."
+    if vendor or product:
+        return "redfish", f"{(vendor or product).strip()}: monitored over Redfish."
+    return None, "The BMC did not say who made it."
+
+
+def detect(host, username="", password="", verify_tls=False):
+    """Ask a BMC what it is: Redfish service root first (it needs no password), then IPMI."""
+    rf = RedfishDriver(host, username, password, verify_tls)
+    try:
+        root = rf.get("/redfish/v1")
+    except DriverError as e:
+        root, rf_error = None, str(e)
+    if root:
+        oem = root.get("Oem") or {}
+        vendor = root.get("Vendor") or next((k for k in oem if k not in ("@odata.type",)), "")
+        product = root.get("Product") or ""
+        firmware = ""
+        hp = oem.get("Hpe") or oem.get("Hp") or {}
+        if hp.get("Manager"):
+            product = product or hp["Manager"][0].get("ManagerType", "")
+            firmware = hp["Manager"][0].get("ManagerFirmwareVersion", "")
+        if username and password and not firmware:
+            try:
+                manager = rf.get(rf.get("/redfish/v1/Managers")["Members"][0]["@odata.id"])
+                firmware = manager.get("FirmwareVersion", "")
+                product = product or manager.get("Model", "")
+            except (DriverError, KeyError, IndexError, TypeError):
+                pass
+        kind, note = suggest(vendor, product, firmware)
+        return {"found": True, "via": "Redfish", "vendor": vendor, "product": product, "firmware": firmware,
+                "suggested": kind, "note": note}
+    if username and password:
+        ipmi = IPMIDriver(host, username, password)
+        try:
+            info = ipmi.ipmi("mc", "info", timeout=15)
+        except DriverError as e:
+            return {"found": False, "error": f"No Redfish ({rf_error}) and no IPMI answer ({e})."}
+        mid = re.search(r"Manufacturer ID\s*:\s*(\d+)", info)
+        fw = re.search(r"Firmware Revision\s*:\s*(\S+)", info)
+        vendor = IPMI_VENDORS.get(int(mid.group(1)), f"manufacturer {mid.group(1)}") if mid else ""
+        kind, note = suggest(vendor, "", fw.group(1) if fw else "")
+        if kind == "redfish":  # no Redfish answered, so watch it over IPMI
+            kind, note = "ipmi", note.replace("over Redfish", "over IPMI")
+        return {"found": True, "via": "IPMI", "vendor": vendor, "product": "", "firmware": fw.group(1) if fw else "",
+                "suggested": kind, "note": note}
+    return {"found": False, "error": f"No Redfish answer ({rf_error}). Enter the user and password to try IPMI."}

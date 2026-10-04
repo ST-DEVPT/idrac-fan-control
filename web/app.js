@@ -572,6 +572,8 @@ async function openEditor() {
   if (!overview) await pollOverview();
   editing = null; editDriver = route.driver || "";
   $("#e-result").hidden = true;
+  $("#d-result").hidden = true;
+  $("#d-form").reset();
   $("#e-form").reset();
   if (route.id) {
     const r = await api("/api/servers/" + encodeURIComponent(route.id));
@@ -587,6 +589,7 @@ async function openEditor() {
   $("#e-lede").textContent = editing ? "Change how to reach the management controller. Leave the password empty to keep the saved one."
     : "Choose what you have, enter how to reach its management controller, and test the connection.";
   $("#e-delete").hidden = !editing;
+  $("#d-form").hidden = !!editing;
   $("#e-cancel").href = editing ? "#/server/" + encodeURIComponent(editing.id) : "#/";
   renderEditor();
 }
@@ -605,6 +608,34 @@ function renderEditor() {
   $("#e-pass").placeholder = editing?.has_password ? "Saved. Type to change" : "";
   if (!$("#e-name").value && !editing) $("#e-name").placeholder = d.kind === "demo" ? "Demo server" : "Rack A";
 }
+
+$("#d-form").onsubmit = async e => {
+  e.preventDefault();
+  const host = $("#d-host").value.trim(), res = $("#d-result");
+  if (!host) return $("#d-host").focus();
+  res.hidden = false; res.className = "result"; res.textContent = "Asking the BMC…";
+  $("#d-go").disabled = true;
+  try {
+    const r = await api("/api/servers/detect", { host, username: $("#d-user").value.trim(), password: $("#d-pass").value });
+    const d = await r.json();
+    if (d.found && d.suggested) {
+      res.className = "result ok";
+      res.innerHTML = `<b>${esc([d.vendor, d.product].filter(Boolean).join(" · ") || "Found")}</b>` +
+        (d.firmware ? `, firmware ${esc(d.firmware)}` : "") + ` (via ${esc(d.via)}). ${esc(d.note)}`;
+      editDriver = d.suggested;
+      $("#e-host").value = host;
+      if ($("#d-user").value) $("#e-user").value = $("#d-user").value.trim();
+      if ($("#d-pass").value) $("#e-pass").value = $("#d-pass").value;
+      renderEditor();
+    } else {
+      res.className = "result bad";
+      res.textContent = d.error || d.note || "Could not tell what this BMC is.";
+    }
+  } catch {
+    res.className = "result bad"; res.textContent = "The dashboard did not answer.";
+  }
+  $("#d-go").disabled = false;
+};
 
 $("#e-tiles").addEventListener("click", e => {
   const t = e.target.closest(".tile");

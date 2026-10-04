@@ -543,3 +543,10 @@ a.btn.primary { color: var(--bg); }
 .curve-presets { align-items: center; margin: -4px 0 12px; }
 .curve-presets .muted { font-size: 12.5px; margin-right: 2px; }
 .curve-presets select { padding: 3px 6px; border: 1px solid var(--rule-2); border-radius: 5px; background: transparent; color: var(--ink-2); font: 12.5px var(--sans); }
+
+/* detect */
+.detect { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 0 0; padding: 12px; border: 1px dashed var(--rule-2); border-radius: 9px; }
+.detect-lead { font-size: 13px; color: var(--ink-2); margin-right: 4px; }
+.detect input { padding: 7px 9px; border: 1px solid var(--rule-2); border-radius: 6px; background: var(--surface); color: var(--ink); font: 13px var(--sans); width: 160px; }
+.detect input:focus { outline: none; border-color: var(--ink); }
+#d-result { margin-top: 10px; max-width: 760px; }

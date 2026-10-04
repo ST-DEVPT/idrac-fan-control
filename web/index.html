@@ -232,6 +232,14 @@
   <ol class="steps">
     <li>
       <h2><span class="n">1</span> Hardware</h2>
+      <form class="detect" id="d-form" autocomplete="off">
+        <span class="detect-lead">Not sure? Let the BMC tell you.</span>
+        <input id="d-host" placeholder="BMC address" spellcheck="false" aria-label="BMC address">
+        <input id="d-user" placeholder="user (optional)" spellcheck="false" aria-label="BMC user">
+        <input id="d-pass" type="password" placeholder="password (optional)" autocomplete="new-password" aria-label="BMC password">
+        <button class="btn" id="d-go">Detect</button>
+      </form>
+      <div class="result" id="d-result" hidden></div>
       <div class="tiles" id="e-tiles" role="radiogroup" aria-label="Server type"></div>
     </li>
     <li id="e-step2" hidden>

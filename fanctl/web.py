@@ -15,7 +15,7 @@ from .alerts import (ALERT_KINDS, SAMPLE, alert_config, build_payload, build_rep
                      public_alert_config, save_alerts, validate_alerts, webhook_of)
 from .config import DATA_DIR, EMBED_TOKEN, INTERVAL, METRICS_TOKEN, VERSION, WEB
 from .control import validate_settings
-from .drivers import DRIVERS, DriverError
+from .drivers import DRIVERS, DriverError, detect
 from .server import SERVERS, registry_lock, save_dashboard_servers, start, stop, unique_id, validate_server
 
 KEY = b""  # set by app.main() once the data folder is known to be writable
@@ -325,6 +325,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, {"ok": True})
         if self.route == "/api/servers/test":
             return self.test_server(body)
+        if self.route == "/api/servers/detect":
+            host = str(body.get("host", "")).strip()
+            try:
+                validate_server({"name": "detect", "driver": "redfish", "host": host, "username": "-", "password": "-"})
+            except ValueError as e:
+                return self.send(400, {"found": False, "error": str(e)})
+            return self.send(200, detect(host, str(body.get("username", "")), str(body.get("password", "")),
+                                         body.get("verify_tls") is True))
         if self.route == "/api/servers":
             with registry_lock:
                 try:

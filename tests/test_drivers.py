@@ -204,3 +204,31 @@ class Redirects(unittest.TestCase):
         cm.exception.close()
         srv.shutdown()
         srv.server_close()
+
+
+class Detection(unittest.TestCase):
+    def test_suggestions(self):
+        cases = [
+            (("Dell", "Integrated Dell Remote Access Controller", "2.65.65.65"), "dell"),
+            (("Dell", "iDRAC", "3.30.30.30"), "dell"),
+            (("Dell", "iDRAC", "4.40.00.00"), "redfish"),
+            (("Hp", "iLO 4", "2.77"), "redfish"),
+            (("HPE", "iLO 5", "2.72"), "redfish"),
+            (("Supermicro", "", ""), "supermicro"),
+            (("Lenovo", "XClarity Controller", ""), "redfish"),
+            (("", "", ""), None),
+        ]
+        for args, kind in cases:
+            with self.subTest(args=args):
+                self.assertEqual(drivers.suggest(*args)[0], kind)
+        self.assertIn("unlocked", drivers.suggest("Hp", "iLO 4", "2.77")[1])
+
+    def test_ilo_service_root(self):
+        root = {"Oem": {"Hp": {"Manager": [{"ManagerType": "iLO 4", "ManagerFirmwareVersion": "2.77"}]}}, "Product": ""}
+        real = drivers.RedfishDriver.get
+        drivers.RedfishDriver.get = lambda self, path: root
+        try:
+            r = drivers.detect("10.0.0.9")
+        finally:
+            drivers.RedfishDriver.get = real
+        self.assertEqual((r["vendor"], r["product"], r["firmware"], r["suggested"]), ("Hp", "iLO 4", "2.77", "redfish"))
