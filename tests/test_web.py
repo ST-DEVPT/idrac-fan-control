@@ -247,3 +247,38 @@ class Roles(Base):
         finally:
             config.TRUST_PROXY = False
             web.failures.clear()
+
+
+class Backup(Base):
+    def test_export_and_import(self):
+        self.post("/api/servers", {"name": "Backed up", "driver": "redfish", "host": "10.1.1.1",
+                                   "username": "admin", "password": "pw-1"})
+        st, h, data = self.get("/api/export")
+        self.assertEqual(st, 200)
+        self.assertIn("attachment", h["Content-Disposition"])
+        plain = json.loads(data)
+        self.assertNotIn("pw-1", data.decode())
+        self.assertIn("rack-a", plain["settings"])
+        self.assertEqual([s["id"] for s in plain["servers"]], ["backed-up"])  # environment servers left out
+        with_secrets = json.loads(self.get("/api/export?secrets=1")[2])
+        self.assertEqual(with_secrets["servers"][0]["password"], "pw-1")
+
+        self.post("/api/servers/backed-up/delete")
+        with_secrets["settings"]["rack-b"]["fixed_speed"] = 44
+        st, _, data = self.post("/api/import", {"data": with_secrets})
+        report = json.loads(data)
+        self.assertEqual(report["added"], ["Backed up"])
+        self.assertIn("Rack B", report["updated"])
+        self.assertEqual(SERVERS["rack-b"].settings()["fixed_speed"], 44)
+        self.assertEqual(SERVERS["backed-up"].cfg["password"], "pw-1")
+        # without passwords, a missing server can't be added and says why
+        self.post("/api/servers/backed-up/delete")
+        report = json.loads(self.post("/api/import", {"data": plain})[2])
+        self.assertEqual(report["added"], [])
+        self.assertIn("password", report["skipped"][0])
+        self.assertEqual(self.post("/api/import", {"data": {"servers": []}})[0], 400)
+
+    def test_viewer_cannot_export(self):
+        st, h, _ = self.req("POST", "/api/login", {"password": "lookonly"})
+        viewer = {"Cookie": h["Set-Cookie"].split(";")[0]}
+        self.assertEqual(self.req("GET", "/api/export", headers=viewer)[0], 403)

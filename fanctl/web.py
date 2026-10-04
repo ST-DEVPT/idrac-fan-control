@@ -139,6 +139,68 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
        "font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; object-src 'none'")
 
 
+# ---------------------------------------------------------------- backup
+
+def export_config(secrets_too=False):
+    """Servers added in the dashboard, every server's settings, and Discord. Passwords and the
+    webhook only when asked for, since the file then unlocks every BMC."""
+    servers = []
+    for s in list(SERVERS.values()):
+        if s.cfg.get("source") != "dashboard":
+            continue
+        row = {k: s.cfg.get(k) for k in ("id", "name", "driver", "host", "username", "verify_tls")}
+        if secrets_too:
+            row["password"] = s.cfg.get("password", "")
+        servers.append(row)
+    alerts_cfg = alert_config()
+    if not secrets_too:
+        alerts_cfg = {k: v for k, v in alerts_cfg.items() if k != "webhook_url"}
+    return {"format": "fan-control-backup", "version": 1, "app": VERSION, "exported": int(time.time()),
+            "with_secrets": secrets_too, "servers": servers,
+            "settings": {s.id: s.settings() for s in list(SERVERS.values())}, "alerts": alerts_cfg}
+
+
+def import_config(data, who="import"):
+    """Apply a backup: add the servers it has that are missing, then settings for every server
+    that exists by then, then Discord. Everything is validated as if typed in the dashboard."""
+    if not isinstance(data, dict) or data.get("format") != "fan-control-backup":
+        raise ValueError("missing format marker")
+    report = {"added": [], "updated": [], "skipped": []}
+    for row in data.get("servers", []):
+        if not isinstance(row, dict):
+            continue
+        sid = str(row.get("id", ""))
+        if sid in SERVERS:
+            report["skipped"].append(f"{row.get('name', sid)}: already here")
+            continue
+        try:
+            cfg = validate_server(row)
+        except ValueError as e:
+            report["skipped"].append(f"{row.get('name', sid)}: {e}")
+            continue
+        cfg["id"] = unique_id(sid or cfg["name"], SERVERS)
+        start(cfg).log(f"Added from a backup by {who}")
+        report["added"].append(cfg["name"])
+    if report["added"]:
+        save_dashboard_servers()
+    for sid, settings in (data.get("settings") or {}).items():
+        srv = SERVERS.get(sid)
+        if not srv:
+            continue
+        try:
+            srv.save_settings(validate_settings(settings, srv.settings()), f"{who} (backup)")
+            report["updated"].append(srv.name)
+        except (ValueError, TypeError) as e:
+            report["skipped"].append(f"{srv.name} settings: {e}")
+    if isinstance(data.get("alerts"), dict):
+        try:
+            save_alerts(validate_alerts(data["alerts"], alert_config()))
+            report["updated"].append("Discord")
+        except (ValueError, TypeError, AttributeError) as e:
+            report["skipped"].append(f"Discord: {e}")
+    return report
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "fan-control"
     sys_version = ""
@@ -287,6 +349,13 @@ class Handler(BaseHTTPRequestHandler):
                                    "has_password": bool(srv.cfg.get("password"))})
         if path == "/api/alerts":
             return self.send(200, public_alert_config(alert_config()))
+        if path == "/api/export":
+            if self.role() != "admin":
+                return self.send(403, {"error": "this account can only look"})
+            secrets_too = self.query.get("secrets", [""])[0] == "1"
+            stamp = time.strftime("%Y%m%d-%H%M")
+            return self.send(200, json.dumps(export_config(secrets_too), indent=2).encode(), "application/json",
+                             headers=[("Content-Disposition", f'attachment; filename="fan-control-{stamp}.json"')])
         if path == "/api/integrations":
             # whether each integration is switched on; the tokens themselves never leave the server
             return self.send(200, {"auth": bool(config.WEB_PASSWORD), "metrics_token": bool(METRICS_TOKEN),
@@ -307,7 +376,7 @@ class Handler(BaseHTTPRequestHandler):
         if origin and urlsplit(origin).netloc not in hosts:
             return self.send(403, {"error": "cross-origin request refused"})
         length = int(self.headers.get("Content-Length") or 0)
-        if length > 10000:
+        if length > (1_000_000 if self.route == "/api/import" else 10000):  # backups can be large
             return self.send(413, {"error": "request too large"})
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
@@ -371,6 +440,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.send(502, {"error": f"Discord answered: {e}"})
             return self.send(200, {"ok": True})
+        if self.route == "/api/import":
+            with registry_lock:
+                try:
+                    report = import_config(body.get("data"), self.who())
+                except (ValueError, TypeError, AttributeError) as e:
+                    return self.send(400, {"error": f"not a Fan Control backup: {e}"})
+            return self.send(200, report)
         if self.route == "/api/servers/test":
             return self.test_server(body)
         if self.route == "/api/servers/detect":

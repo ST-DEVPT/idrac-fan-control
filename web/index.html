@@ -20,6 +20,7 @@
     <a href="#/prometheus" data-route="prometheus">Prometheus</a>
     <a href="#/grafana" data-route="grafana">Grafana</a>
     <a href="#/homarr" data-route="homarr">Homarr</a>
+    <a href="#/backup" data-route="backup">Backup</a>
   </nav>
   <div class="side-label"><span>Servers</span><a href="#/add" class="side-add" title="Add a server" aria-label="Add a server">+</a></div>
   <nav class="side-servers" id="side-servers" aria-label="Servers"></nav>
@@ -383,6 +384,35 @@
       <div class="board" id="hm-board"><iframe id="hm-frame" title="Widget preview" loading="lazy"></iframe></div>
       <p class="hint">Shown with your session; Homarr will use the token.</p>
     </aside>
+  </div>
+</section>
+
+<!-- ======================================================== Backup -->
+<section class="view" id="v-backup" hidden>
+  <header class="page-head">
+    <div>
+      <h1>Backup</h1>
+      <p class="lede">Save the servers, every fan setting and the Discord configuration to a file, and bring them back on this or another machine.</p>
+    </div>
+  </header>
+  <div class="int-grid">
+    <div class="int-main">
+      <section class="int-step">
+        <h2><span class="n">1</span> Export</h2>
+        <p>Servers defined in the environment are not included; their settings are.</p>
+        <label class="check"><input type="checkbox" id="bk-secrets"> Include BMC passwords and the Discord webhook</label>
+        <p class="hint" id="bk-warn" hidden>Keep this file safe: anyone who has it can control every server in it.</p>
+        <p><a class="btn primary" id="bk-export" href="/api/export">Download backup</a></p>
+      </section>
+      <section class="int-step">
+        <h2><span class="n">2</span> Import</h2>
+        <p>Adds the servers that are not here yet, then applies the settings and Discord configuration. Servers
+          already here keep their connection details.</p>
+        <p><input type="file" id="bk-file" accept="application/json,.json"></p>
+        <div class="result" id="bk-preview" hidden></div>
+        <p><button class="btn primary" id="bk-import" disabled>Import</button></p>
+      </section>
+    </div>
   </div>
 </section>
 

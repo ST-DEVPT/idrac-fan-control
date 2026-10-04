@@ -48,7 +48,7 @@ function parseRoute() {
   if (parts[0] === "add") return { view: "edit", driver: parts[1] || "" };
   if (parts[0] === "edit" && parts[1]) return { view: "edit", id: parts[1] };
   if (parts[0] === "alerts") return { view: "alerts" };
-  if (["prometheus", "grafana", "homarr"].includes(parts[0])) return { view: parts[0] };
+  if (["prometheus", "grafana", "homarr", "backup"].includes(parts[0])) return { view: parts[0] };
   return { view: "overview" };
 }
 
@@ -68,7 +68,7 @@ function go() {
   if (route.view === "edit") openEditor();
   if (route.view === "overview") renderOverview();
   if (["prometheus", "grafana", "homarr"].includes(route.view)) renderIntegration(route.view);
-  const title = { overview: "Overview", alerts: "Discord", prometheus: "Prometheus", grafana: "Grafana", homarr: "Homarr",
+  const title = { overview: "Overview", alerts: "Discord", prometheus: "Prometheus", grafana: "Grafana", homarr: "Homarr", backup: "Backup",
                   edit: route.id ? "Edit server" : "Add a server" }[route.view];
   if (title) document.title = `${title} · Fan Control`;
   scrollTo(0, 0);
@@ -697,6 +697,42 @@ $("#e-delete").onclick = async () => {
   toast(`${editing.name} removed`);
   await pollOverview();
   location.hash = "#/";
+};
+
+// ---------------------------------------------------------------- backup
+let backup = null;
+$("#bk-secrets").onchange = e => {
+  $("#bk-export").href = "/api/export" + (e.target.checked ? "?secrets=1" : "");
+  $("#bk-warn").hidden = !e.target.checked;
+};
+$("#bk-file").onchange = async e => {
+  const res = $("#bk-preview"), file = e.target.files[0];
+  backup = null; $("#bk-import").disabled = true;
+  if (!file) return;
+  res.hidden = false;
+  try {
+    const d = JSON.parse(await file.text());
+    if (d.format !== "fan-control-backup") throw new Error("not a Fan Control backup");
+    backup = d;
+    res.className = "result ok";
+    res.textContent = `Backup from ${new Date(d.exported * 1000).toLocaleString()}: ${d.servers.length} server(s), ` +
+      `settings for ${Object.keys(d.settings || {}).length}, Discord ${d.alerts ? "included" : "not included"}` +
+      (d.with_secrets ? ", with passwords." : ", without passwords (servers will need theirs typed in).");
+    $("#bk-import").disabled = false;
+  } catch (err) {
+    res.className = "result bad"; res.textContent = "Can't use this file: " + err.message;
+  }
+};
+$("#bk-import").onclick = async () => {
+  $("#bk-import").disabled = true;
+  const r = await api("/api/import", { data: backup });
+  const d = await r.json();
+  const res = $("#bk-preview");
+  if (!r.ok) { res.className = "result bad"; res.textContent = d.error; return; }
+  res.className = "result ok";
+  res.innerHTML = [d.added.length && `Added: ${esc(d.added.join(", "))}.`, d.updated.length && `Updated: ${esc(d.updated.join(", "))}.`,
+    d.skipped.length && `Skipped: ${esc(d.skipped.join("; "))}.`].filter(Boolean).join(" ") || "Nothing to change.";
+  pollOverview();
 };
 
 // ---------------------------------------------------------------- shell
