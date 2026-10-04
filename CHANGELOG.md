@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.0.0]
+
+- Supports more than Dell: Supermicro (fan control, experimental), HPE iLO 4 with unlocked firmware
+  (fan caps over SSH, experimental), any Redfish BMC such as HPE iLO 4/5/6 and Lenovo XCC, and any IPMI
+  BMC (monitoring only).
+- Servers are added, tested, edited and removed in the dashboard. Environment variables still work and
+  gain `IDRAC_<n>_DRIVER` and `IDRAC_<n>_VERIFY_TLS`.
+- Redesign: sidebar with every server, an overview of the whole rack, a page per server and a setup
+  assistant with a connection test.
+- Prometheus, Grafana and Homarr each have their own page: generated scrape config and live metrics,
+  dashboard download with import steps, and a widget address builder with a live preview.
+- "Dell" mode is now "Automatic"; saved settings are converted.
+- Metrics gain a `driver` label and `idrac_fan_percent` for BMCs that report fan speed in percent.
+- Redfish requests refuse redirects, so credentials never follow a redirect to another host.
+
 ## [1.2.0]
 
 - Discord status reports: temperatures, fan speed, power, min/avg/max, time in Dell mode, trend lines

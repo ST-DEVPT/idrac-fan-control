@@ -1,8 +1,9 @@
-# iDRAC Fan Control
+# Fan Control
 
-**Quiet Dell PowerEdge servers, without cooking them.** A self-hosted web dashboard that takes over
-fan control through the iDRAC, follows a temperature curve you draw, and hands control back to Dell
-the moment anything looks wrong.
+**Quiet rack servers, without cooking them.** A self-hosted dashboard for Dell PowerEdge, Supermicro,
+HPE ProLiant and any Redfish or IPMI server: it takes over fan control where the vendor allows it,
+follows a temperature curve you draw, hands control back to the BMC the moment anything looks wrong,
+and watches everything else.
 
 [![CI](https://github.com/ST-DEVPT/idrac-fan-control/actions/workflows/docker.yml/badge.svg)](https://github.com/ST-DEVPT/idrac-fan-control/actions/workflows/docker.yml)
 [![Release](https://img.shields.io/github/v/release/ST-DEVPT/idrac-fan-control)](https://github.com/ST-DEVPT/idrac-fan-control/releases)
@@ -16,14 +17,32 @@ the moment anything looks wrong.
 
 ## Highlights
 
-- **Fixed speed or a fan curve** you drag into shape, with Dell's automatic mode one click away.
+- **Every server in one place**: an overview of the whole rack, and a page per server.
+- **Add servers from the browser**: pick the hardware, enter the BMC address, test the connection, save.
+- **Fixed speed or a fan curve** you drag into shape, with the BMC's automatic mode one click away.
 - **Fails safe**: a failsafe temperature, missing readings, a refused command, a crash or `docker stop`
-  all hand the fans back to the iDRAC.
+  all hand the fans back to the BMC.
 - **Smooth**: fans speed up at once and slow down only after a delay, so they don't hunt up and down.
-- **Several servers** in one dashboard, with three hours of history that survives restarts.
 - **Discord**: alerts you can fully customise, plus a status card that keeps itself up to date.
 - **Prometheus metrics**, a ready-made **Grafana** dashboard and a widget for **Homarr**.
-- **Small and private**: one Python file, no dependencies, no third-party requests, runs as non-root.
+- **Small and private**: plain Python, no dependencies, no third-party requests, runs as non-root.
+
+## Supported hardware
+
+| Type | Servers | Fan control | Reads |
+| --- | --- | --- | --- |
+| **Dell PowerEdge (iDRAC)** | iDRAC 6, 7, 8, and iDRAC 9 up to firmware 3.30.30.30 | Yes | IPMI |
+| **Supermicro** | X9, X10 and X11 boards | Yes, experimental | IPMI |
+| **HPE iLO 4, unlocked firmware** | ProLiant Gen8 / Gen9 with the community-patched iLO 4 2.77 | Yes (caps over SSH), experimental | Redfish |
+| **Redfish** | HPE iLO 4 (2.30+), iLO 5, iLO 6, Lenovo XCC, Dell iDRAC 9, most recent BMCs | Monitoring only | Redfish |
+| **Other IPMI** | Any BMC with IPMI over LAN | Monitoring only | IPMI |
+| **Demo** | Simulated readings | Yes (simulated) | — |
+
+Monitoring only means the vendor firmware offers no way to set fan speed. Those servers still get the
+overview card, history, Discord alerts and reports, metrics and the Homarr widget, which is often enough to
+find what makes a server loud: on HPE, a third-party PCIe card or disk the iLO cannot read is the usual cause.
+
+Dell iDRAC 9 from firmware 3.34.34.34, and iDRAC 10, no longer accept fan commands: add them as Redfish.
 
 ## Contents
 
@@ -34,54 +53,47 @@ the moment anything looks wrong.
 [Prometheus and Grafana](#prometheus-and-grafana) ·
 [Homarr and other dashboards](#homarr-and-other-dashboards) ·
 [Reverse proxy and security](#reverse-proxy-and-security) ·
-[Compatibility and troubleshooting](#compatibility-and-troubleshooting) ·
+[Troubleshooting](#troubleshooting) ·
 [Upgrading](#upgrading) ·
 [Development](#development)
 
 ## Quick start
 
-**1. Prepare the iDRAC**
-
-- The iDRAC user must be an **Administrator**.
-- Enable **IPMI over LAN**: iDRAC Settings → Network → IPMI Settings.
-- Optional check from any Linux machine:
-
-  ```bash
-  ipmitool -I lanplus -H <idrac-ip> -U <user> -P <password> sdr type temperature
-  ```
-
-**2. Get the compose file and a data folder**
+**1. Run the container**
 
 ```bash
-mkdir idrac-fan-control && cd idrac-fan-control
+mkdir fan-control && cd fan-control
 curl -O https://raw.githubusercontent.com/ST-DEVPT/idrac-fan-control/main/docker-compose.yml
 mkdir data && chown 1000:1000 data
 ```
 
-**3. Set the iDRAC address, its credentials and a dashboard password**
-
-Edit `IDRAC_HOST`, `IDRAC_USERNAME`, `IDRAC_PASSWORD` and `WEB_PASSWORD` in `docker-compose.yml`. Then:
+Set `WEB_PASSWORD` in `docker-compose.yml`, then:
 
 ```bash
 docker compose up -d
 ```
 
-**4. Open `http://<docker-host>:8080`** and sign in with `WEB_PASSWORD`.
+**2. Open `http://<docker-host>:8080`**, sign in, and choose **Add server**.
+
+**3. Pick your hardware**, enter the BMC address, user and password, and press **Test connection**.
+The test reads the BMC once and shows the model, sensors and power draw before anything is saved.
+
+Before adding a server, prepare its BMC:
+
+- **Dell**: enable **IPMI over LAN** (iDRAC Settings → Network → IPMI Settings); the user must be an Administrator.
+- **Supermicro**: IPMI over LAN is on by default; use an Administrator account.
+- **HPE and other Redfish**: any account that can read the system health. Redfish uses HTTPS (port 443).
+- **HPE iLO 4 unlocked**: SSH (port 22) and HTTPS must both be reachable, and the firmware must be the patched 2.77.
 
 Images are built for `linux/amd64` and `linux/arm64`: `ghcr.io/st-devpt/idrac-fan-control:latest`,
-or pin a version such as `:1.2`.
+or pin a version such as `:2.0`.
 
 ## Configuration
 
-Everything about the fans and Discord is set in the dashboard. The environment only holds what the
-dashboard should not: addresses, passwords and tokens.
+Servers, fan settings and Discord are configured in the dashboard. The environment holds the rest:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `IDRAC_HOST` | `local` | iDRAC IP or hostname. `local` when the container runs on the server itself (see [Upgrading](#upgrading)). `demo` for simulated data |
-| `IDRAC_USERNAME` | `root` | iDRAC user (must be an Administrator) |
-| `IDRAC_PASSWORD` | `calvin` | iDRAC password. Given to `ipmitool` through its environment, never on the command line |
-| `IDRAC_NAME` | the host | Name shown in the dashboard and in Discord |
 | `WEB_PASSWORD` | empty | Dashboard password. Empty disables sign-in; only do that on a trusted network |
 | `CHECK_INTERVAL` | `15` | Seconds between readings and fan commands. Minimum 5 |
 | `DISCORD_WEBHOOK_URL` | empty | Default Discord webhook. A webhook pasted in the dashboard takes precedence |
@@ -89,41 +101,52 @@ dashboard should not: addresses, passwords and tokens.
 | `EMBED_TOKEN` | empty | Enables the read-only `/embed` widget with `?token=<token>` |
 | `PORT` | `8080` | HTTP port inside the container |
 
-### Several servers
+### Servers in the environment
 
-Number the variables. Each server gets its own tab, settings, history and alerts:
+Servers can also be declared in `docker-compose.yml`, for example to keep credentials in a `.env` file.
+They show up in the dashboard like the others, but can only be changed in the environment. Number them:
 
 ```yaml
     environment:
       IDRAC_1_NAME: Compute
-      IDRAC_1_HOST: 192.168.1.120
+      IDRAC_1_DRIVER: dell              # dell, supermicro, ilo4-unlocked, redfish, ipmi or demo
+      IDRAC_1_HOST: 192.168.1.120       # "local" for IPMI from the server itself
       IDRAC_1_USERNAME: root
-      IDRAC_1_PASSWORD: ${COMPUTE_IDRAC_PASSWORD}
-      IDRAC_2_NAME: Storage
+      IDRAC_1_PASSWORD: ${COMPUTE_BMC_PASSWORD}
+      IDRAC_2_NAME: DL360
+      IDRAC_2_DRIVER: redfish
       IDRAC_2_HOST: 192.168.1.121
-      IDRAC_2_USERNAME: root
-      IDRAC_2_PASSWORD: ${STORAGE_IDRAC_PASSWORD}
+      IDRAC_2_USERNAME: Administrator
+      IDRAC_2_PASSWORD: ${DL360_ILO_PASSWORD}
+      IDRAC_2_VERIFY_TLS: "false"       # BMCs ship self-signed certificates
 ```
+
+The 1.x single-server variables (`IDRAC_HOST`, `IDRAC_USERNAME`, `IDRAC_PASSWORD`, `IDRAC_NAME`)
+still work and keep their settings.
 
 ### What is stored in `/data`
 
 | File | Contents |
 | --- | --- |
+| `servers.json` | Servers added in the dashboard, with their BMC passwords (file mode 600, never sent to the browser) |
 | `settings.json`, `settings-<server>.json` | Mode, fixed speed, curve, failsafe, ramp-down delay, PCIe setting |
 | `history-<server>.json` | The last three hours of readings and events, saved every 5 minutes and on stop |
 | `alerts.json` | Discord settings, including the webhook (file mode 600, never sent to the browser) |
 | `report-state.json` | Which Discord message the status card is edited into |
+| `known_hosts` | SSH host keys of unlocked iLO 4 servers, recorded on first connection |
 | `secret` | Key that signs sign-in sessions. Delete it to sign everyone out |
 
 ## Fan control
 
+For servers whose type has fan control (Dell, Supermicro, unlocked iLO 4):
+
 | Mode | What happens |
 | --- | --- |
-| **Dell** | The iDRAC runs its factory profile. Loudest, and the fallback for every problem |
+| **Automatic** | The BMC runs its factory profile. Loudest, and the fallback for every problem |
 | **Fixed** | Every fan at one speed while the CPU is below the failsafe |
 | **Curve** | Speed follows the hottest CPU along the points you drag. Double-click adds or removes a point |
 
-**Failsafe temperature.** At or above it, the iDRAC takes over. Manual control resumes once the CPU
+**Failsafe temperature.** At or above it, the BMC takes over. Manual control resumes once the CPU
 is 3 °C below it, so the fans don't flap at the edge.
 
 **Ramp-down delay.** Fans speed up as soon as the curve asks for it, but slow down only after the lower
@@ -138,13 +161,19 @@ not change where temperatures settle.
 | --- | --- | --- | --- | --- | --- | --- |
 | Fans | 12 % | 15 % | 22 % | 35 % | 55 % | 72 °C |
 
-Some iDRACs raise fan alarms below about 10 %. Third-party PCIe cards (HBAs, 10 GbE NICs, GPUs) are not
-measured by the controller: with any of them installed, stay at 15 % or above and leave Dell's PCIe cooling
-response **On**.
+Some BMCs raise fan alarms below about 10 %. Third-party PCIe cards (HBAs, 10 GbE NICs, GPUs) are not
+measured by the controller: with any of them installed, stay at 15 % or above, and on Dell leave the
+third-party PCIe cooling response **On**.
 
-**When something goes wrong** the fans go back to the iDRAC: no CPU reading, server powered off,
-a fan command refused, an exception in the control loop, the container stopping. The manual command is
-also re-sent on every cycle, because an iDRAC reset silently returns to Dell mode.
+**Per vendor.** Dell gets one IPMI command for all fans (some 11th-generation servers refuse it; the
+controller then finds the fans they accept and sets them one by one). Supermicro is put in *Full* fan mode
+and both zones are set; it goes back to *Optimal* when released. On an unlocked iLO 4 the controller caps
+every fan over SSH (`fan p N max`), so the iLO's own curve still runs underneath the cap; releasing removes
+the cap.
+
+**When something goes wrong** the fans go back to the BMC: no CPU reading, server powered off,
+a fan command refused, an exception in the control loop, the server being removed, the container stopping.
+The manual command is also re-sent on every cycle, because a BMC reset silently returns to automatic mode.
 
 ## Discord
 
@@ -153,19 +182,19 @@ Open the **Discord alerts** section of the dashboard and paste a webhook (Server
 
 - **Look**: bot name, avatar, footer, and a colour for each level (error, warning, resolved, info).
 - **Mentions**: nobody, `@here`, `@everyone`, a role or a user, only for the levels you choose.
-  Text that comes from the iDRAC can never ping anyone.
+  Text that comes from a BMC can never ping anyone.
 - **Cooldown**: minimum time between two alerts of the same kind for the same server.
 - **Events**: turn each on or off and write its title and message. A live preview shows the result and
   **Send test** posts it before you save.
 
 | Event | Level | Sent when |
 | --- | --- | --- |
-| Failsafe reached | warning | The CPU reaches the failsafe and the iDRAC takes over |
+| Failsafe reached | warning | The CPU reaches the failsafe and the BMC takes over |
 | Failsafe cleared | resolved | Manual control resumes |
 | Running hot | warning | The CPU passes the "running hot" temperature (off by default) |
-| iDRAC unreachable | error | Readings fail |
-| Fan command refused | error | The iDRAC rejects a fan command |
-| Back to normal | resolved | The iDRAC answers and accepts commands again |
+| BMC unreachable | error | Readings fail |
+| Fan command refused | error | The BMC rejects a fan command |
+| Back to normal | resolved | The BMC answers and accepts commands again |
 | Controller error | error | The control loop hits an unexpected error |
 | Settings changed | info | Someone applies new settings (off by default) |
 | Controller started | info | The container starts (off by default) |
@@ -203,7 +232,7 @@ scrape_configs:
 | `idrac_temperature_celsius` | `server`, `name`, `sensor`, `entity` |
 | `idrac_fan_rpm` | `server`, `name`, `fan` |
 
-Grafana: Dashboards → New → Import, upload `docs/grafana/idrac-fan-control.json` and pick your
+Grafana: Dashboards → New → Import, upload `idrac-fan-control.json` (download it from the **Grafana** page of the dashboard, or `web/grafana.json` in this repository) and pick your
 Prometheus data source.
 
 ## Homarr and other dashboards
@@ -246,25 +275,18 @@ every change, a strict Content-Security-Policy, request size and time limits, an
 uid 1000 with a read-only root filesystem and no capabilities. Details and how to report a vulnerability
 are in [SECURITY.md](SECURITY.md).
 
-## Compatibility and troubleshooting
+## Troubleshooting
 
-Manual fan control uses Dell's OEM IPMI commands. Whether a server accepts them depends on the iDRAC
-firmware, not on the model:
+Use **Test connection** on the server's page (Edit) to see the BMC's answer without saving anything.
 
-| iDRAC | Manual fan control |
+| Message | Meaning |
 | --- | --- |
-| iDRAC 6, 7 and 8 (11th to 13th generation) | Supported |
-| iDRAC 9 up to firmware 3.30.30.30 | Supported |
-| iDRAC 9 from firmware 3.34.34.34, iDRAC 10 | Removed by Dell |
-
-Some 11th-generation servers reject the "all fans" selector. The controller then finds the fan
-identifiers they accept and sets the fans one by one; the event log says so.
-
-| In the event log | Meaning |
-| --- | --- |
-| `rsp=0xc1` | The firmware does not have the fan commands (iDRAC 9 3.34.34.34 or later) |
-| `rsp=0xd4` | The iDRAC user is not an Administrator |
+| `rsp=0xc1` | The firmware does not have the fan commands (Dell iDRAC 9 3.34.34.34 or later): use the Redfish type |
+| `rsp=0xd4` | The BMC user is not an Administrator |
 | `Unable to establish IPMI v2 / RMCP+ session` | Wrong address or credentials, or IPMI over LAN is off |
+| `Redfish ...: HTTP 401` | Wrong user name or password |
+| `Redfish ...: timed out` | The BMC is not reachable on HTTPS from the container |
+| `SSH: ... (is the iLO firmware unlocked?)` | The iLO answered, but does not have the `fan` command: stock firmware |
 | `ERROR: cannot write to /data` (container log) | The data folder is not owned by uid 1000 |
 
 ## Upgrading
@@ -273,7 +295,11 @@ identifiers they accept and sets the fans one by one; the event log says so.
 docker compose pull && docker compose up -d
 ```
 
-**From 1.0:** the container now runs as uid 1000. Give it the data folder once:
+**From 1.x:** servers declared with `IDRAC_*` variables keep working, with their settings and history,
+and are shown as defined in the environment. To manage one from the dashboard instead, add it there and
+remove its variables. The fan mode called "Dell" is now "Automatic"; saved settings are converted.
+
+**From 1.0:** the container runs as uid 1000. Give it the data folder once:
 
 ```bash
 chown -R 1000:1000 ./data
@@ -287,17 +313,18 @@ With `IDRAC_HOST=local`, the container needs `/dev/ipmi0` and root to open it:
       - /dev/ipmi0:/dev/ipmi0
 ```
 
-Settings, curves and history carry over. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Development
 
 ```bash
-IDRAC_HOST=demo python app.py   # dashboard on http://localhost:8080 with simulated data
-python test_app.py              # self-check: parsing, control logic, sessions, HTTP, alerts
+python app.py                   # dashboard on http://localhost:8080; add a "Demo server" to try it
+python test_app.py              # self-check: drivers, control logic, sessions, HTTP, alerts
 ```
 
-Python 3.10 or newer, no dependencies. The web pages are in `web/`, served with a strict
-Content-Security-Policy, so scripts and styles live in their own files.
+Python 3.10 or newer, no dependencies. `drivers.py` holds one class per kind of server: adding a vendor
+means implementing `read()` and, if it can control fans, `set_speed()` and `set_auto()`. The web pages are
+in `web/`, served with a strict Content-Security-Policy, so scripts and styles live in their own files.
 
 ## License
 

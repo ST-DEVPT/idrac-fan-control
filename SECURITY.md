@@ -26,6 +26,14 @@ It is not meant to be exposed to the internet.
 - **Credentials**: iDRAC passwords are read from the environment, passed to `ipmitool` through its
   environment (never on the command line), and never sent to the browser. `ipmitool` gets no other
   environment variables.
+- **Servers added in the dashboard**: their BMC passwords are stored in `/data/servers.json` (mode 600)
+  and never returned to the browser; editing a server without typing a password keeps the stored one.
+  Addresses are validated as host names or IPs, and every tool gets them as a separate argument, never
+  through a shell. Redfish requests refuse redirects, so the `Authorization` header cannot be sent to another
+  host. "Test connection" lets a signed-in user make the container contact an address of their choice,
+  which is the point of the feature: keep sign-in enabled.
+- **TLS to BMCs**: certificates are not verified by default, because BMCs ship self-signed ones. Turn on
+  verification per server when the BMC has a trusted certificate.
 - **Input**: settings are validated by type and range; request bodies are capped at 10 kB and
   connections time out after 30 seconds. Static files come from a fixed allowlist.
 - **Fan safety**: any error, missing reading, crash in the control loop or container stop hands the fans
