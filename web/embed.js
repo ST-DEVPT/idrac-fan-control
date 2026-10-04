@@ -26,13 +26,13 @@ function render(s) {
   $("name").textContent = s.name;
   $("dot").className = "dot " + (s.error ? "bad" : s.failsafe ? "warn" : "ok");
   $("mode").textContent = s.error ? "BMC error" : s.failsafe ? "Failsafe" : monitor ? "Monitoring" : auto ? "Automatic" : s.settings.mode === "fixed" ? "Fixed" : "Curve";
-  $("cpu").innerHTML = s.cpu_temp == null ? "—" : `${fmt(s.cpu_temp)}<small>°C</small>`;
+  $("cpu").innerHTML = s.cpu_temp == null ? "—" : `${fmt(tv(s.cpu_temp))}<small>${tu()}</small>`;
   $("cpu").classList.toggle("hot", s.cpu_temp != null && s.cpu_temp >= s.settings.failsafe_temp - 5);
   $("fans").innerHTML = monitor ? (pcts.length ? `${fmt(pcts.reduce((a, b) => a + b) / pcts.length)}<small>%</small>` : "—")
     : auto ? "Auto" : `${fmt(s.applied_speed)}<small>%</small>`;
   $("watts").innerHTML = sens.watts == null ? "—" : `${fmt(sens.watts)}<small>W</small>`;
-  $("inlet").textContent = sens.inlet == null ? "—" : `${fmt(sens.inlet)} °C`;
-  $("exhaust").textContent = sens.exhaust == null ? "—" : `${fmt(sens.exhaust)} °C`;
+  $("inlet").textContent = sens.inlet == null ? "—" : `${fmt(tv(sens.inlet))} ${tu()}`;
+  $("exhaust").textContent = sens.exhaust == null ? "—" : `${fmt(tv(sens.exhaust))} ${tu()}`;
   $("rpm").textContent = rpms.length ? `${Math.round(rpms.reduce((a, b) => a + b) / rpms.length).toLocaleString()} rpm` : "";
 
   // last hour: CPU temperature, with the fan speed underneath

@@ -70,7 +70,7 @@ function go() {
   if (["prometheus", "grafana", "homarr"].includes(route.view)) renderIntegration(route.view);
   const title = { overview: "Overview", alerts: "Discord", prometheus: "Prometheus", grafana: "Grafana", homarr: "Homarr", backup: "Backup",
                   edit: route.id ? "Edit server" : "Add a server" }[route.view];
-  if (title) document.title = `${title} · Fan Control`;
+  if (title) document.title = `${translate(title)} · Fan Control`;
   scrollTo(0, 0);
 }
 addEventListener("hashchange", go);
@@ -115,7 +115,7 @@ function renderSide() {
     const st = status(x);
     return `<a href="#/server/${encodeURIComponent(x.id)}" aria-current="${route.view === "server" && route.id === x.id}">
       <span class="dot ${st.cls}"></span><span class="nm">${esc(x.name)}</span>
-      <span class="t">${x.cpu_temp == null ? "" : fmt(x.cpu_temp) + "°"}</span></a>`;
+      <span class="t">${x.cpu_temp == null ? "" : fmt(tv(x.cpu_temp)) + "°"}</span></a>`;
   }).join("") || '<p class="side-empty">No servers yet</p>';
 }
 
@@ -135,10 +135,10 @@ function renderOverview() {
   const issues = list.filter(x => x.error || x.failsafe).length;
   $("#ov-lede").textContent = [
     `${list.length} server${list.length > 1 ? "s" : ""}`,
-    temps.length ? `hottest CPU ${fmt(Math.max(...temps))} °C` : "",
+    temps.length ? `hottest CPU ${fmt(tv(Math.max(...temps)))} ${tu()}` : "",
     watts.length ? `${fmt(watts.reduce((a, b) => a + b))} W in total` : "",
     issues ? `${issues} need${issues > 1 ? "" : "s"} attention` : "all fine",
-  ].filter(Boolean).join(" · ");
+  ].filter(Boolean).map(translate).join(" · ");
   $("#fleet").innerHTML = list.map(card).join("") +
     `<a class="card add" href="#/add"><span class="plus">+</span><span>Add a server</span></a>`;
 }
@@ -152,9 +152,9 @@ function card(x) {
     <div class="card-top"><span class="dot ${st.cls}"></span><b>${esc(x.name)}</b><span class="vendor">${esc(x.vendor)}</span></div>
     <div class="card-sub">${esc(x.model || x.driver_label)}${x.host ? " · " + esc(x.host) : ""}</div>
     <div class="card-main">
-      <div class="big${x.cpu_temp != null && x.cpu_temp >= 70 ? " hot" : ""}">${unit(x.cpu_temp, "°C")}</div>
+      <div class="big${x.cpu_temp != null && x.cpu_temp >= 70 ? " hot" : ""}">${unit(tv(x.cpu_temp), tu())}</div>
       <dl><div><dt>Fans</dt><dd>${fans}</dd></div><div><dt>Power</dt><dd>${x.watts == null ? "—" : fmt(x.watts) + " W"}</dd></div>
-        <div><dt>Inlet</dt><dd>${x.inlet == null ? "—" : fmt(x.inlet) + " °C"}</dd></div></dl>
+        <div><dt>Inlet</dt><dd>${x.inlet == null ? "—" : fmt(tv(x.inlet)) + " " + tu()}</dd></div></dl>
     </div>
     ${cardSpark(x.spark)}
     <div class="card-foot"><span class="state ${st.cls}">${esc(x.error ? "Unreachable: " + x.error : st.text)}</span><span class="badge">${badge}</span></div>
@@ -213,19 +213,19 @@ function renderServer() {
 
   const cpus = sens.temps.filter(t => t.cpu).sort((a, b) => b.value - a.value);
   const fs = draft.failsafe_temp;
-  $("#v-cpu").innerHTML = unit(s.cpu_temp, "°C");
+  $("#v-cpu").innerHTML = unit(tv(s.cpu_temp), tu());
   $("#v-cpu").classList.toggle("hot", s.cpu_temp != null && s.cpu_temp >= fs - 5);
-  $("#cpu-name").textContent = cpus.length > 1 ? cpus.map(c => `${c.name.replace("CPU ", "#")} ${fmt(c.value)}°`).join(" · ") : "";
-  $("#s-cpu").textContent = s.cpu_temp == null ? "" : monitor ? (cpus[0]?.name || "") : `${fmt(fs - s.cpu_temp)} °C below failsafe`;
+  $("#cpu-name").textContent = cpus.length > 1 ? cpus.map(c => `${c.name.replace("CPU ", "#")} ${fmt(tv(c.value))}°`).join(" · ") : "";
+  $("#s-cpu").textContent = s.cpu_temp == null ? "" : monitor ? (cpus[0]?.name || "") : `${fmt(td(fs - s.cpu_temp))} ${tu()} below failsafe`;
   $("#v-speed").innerHTML = monitor ? unit(avgPct, "%") : auto ? "Auto" : unit(s.applied_speed, "%");
-  $("#s-speed").textContent = monitor ? "set by the BMC" : cap(s.reason);
+  $("#s-speed").textContent = monitor ? "set by the BMC" : cap(translate(s.reason));
   $("#lbl-fanavg").textContent = rpms.length ? "Average speed" : "Fans reporting";
   $("#v-rpm").innerHTML = avgRpm != null ? `${(avgRpm / 1000).toFixed(1)}<small>k rpm</small>` : unit(sens.fans.length || null, "fans");
   $("#s-rpm").textContent = rpms.length ? `${Math.min(...rpms).toLocaleString()}–${Math.max(...rpms).toLocaleString()} across ${rpms.length} fans`
     : pcts.length ? `${Math.min(...pcts)}–${Math.max(...pcts)} %` : "";
-  $("#v-inlet").innerHTML = unit(sens.inlet, "°C");
-  $("#v-exhaust").innerHTML = unit(sens.exhaust, "°C");
-  $("#s-exhaust").textContent = sens.inlet != null && sens.exhaust != null ? `+${fmt(sens.exhaust - sens.inlet)} °C over inlet` : "";
+  $("#v-inlet").innerHTML = unit(tv(sens.inlet), tu());
+  $("#v-exhaust").innerHTML = unit(tv(sens.exhaust), tu());
+  $("#s-exhaust").textContent = sens.inlet != null && sens.exhaust != null ? `+${fmt(td(sens.exhaust - sens.inlet))} ${tu()} over inlet` : "";
   $("#v-watts").innerHTML = unit(sens.watts, "W");
   const w = s.history.filter(p => p.watts != null && p.t > Date.now() / 1000 - 3600).map(p => p.watts);
   $("#s-watts").textContent = w.length > 1 ? `1 h average: ${fmt(w.reduce((a, b) => a + b) / w.length)} W` : "";
@@ -254,8 +254,8 @@ function renderServer() {
     const near = t.warn && t.value >= t.warn - draft.threshold_margin;
     return `<tr><td>${esc(t.name)} <span class="mono muted">${esc(t.entity)}</span></td>
     <td class="bar"><div class="meter${t.warn ? " has-warn" : ""}"><i class="${near || (t.cpu && t.value >= fs - 5) ? "hot" : "c"}" style="width:${pos(t.value)}%"></i>
-      ${t.warn ? `<b class="warn-tick" style="left:${pos(t.warn)}%" title="BMC warning at ${fmt(t.warn)} °C"></b>` : ""}</div></td>
-    <td class="r">${fmt(t.value)}${t.warn ? `<small class="muted"> / ${fmt(t.warn)}</small>` : ""}</td></tr>`;
+      ${t.warn ? `<b class="warn-tick" style="left:${pos(t.warn)}%" title="BMC warning at ${fmt(tv(t.warn))} ${tu()}"></b>` : ""}</div></td>
+    <td class="r">${fmt(tv(t.value))}${t.warn ? `<small class="muted"> / ${fmt(tv(t.warn))}</small>` : ""}</td></tr>`;
   }).join("") || '<tr class="empty"><td colspan="3">No readings</td></tr>';
   $("#updated").textContent = `every ${s.interval} s`;
   $("#log").innerHTML = s.events.map(e => `<tr><td>${time(e.t, true)}</td><td class="${e.level}">${esc(e.msg)}</td></tr>`).join("")
@@ -300,16 +300,18 @@ function renderControls() {
   $$(".seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === draft.mode));
   $$(".panel").forEach(p => p.classList.toggle("on", p.dataset.panel === draft.mode));
   if (document.activeElement !== $("#fixed")) $("#fixed").value = draft.fixed_speed;
-  if (document.activeElement !== $("#smart-target")) $("#smart-target").value = draft.smart_target;
-  $("#smart-out").innerHTML = `${draft.smart_target}<small> °C</small>`;
+  $("#smart-target").min = Math.round(tv(40)); $("#smart-target").max = Math.round(tv(85));
+  if (document.activeElement !== $("#smart-target")) $("#smart-target").value = Math.round(tv(draft.smart_target));
+  $("#smart-out").innerHTML = `${fmt(tv(draft.smart_target))}<small> ${tu()}</small>`;
+  $$(".tu").forEach(el => el.textContent = tu());
   $("#smart-live").textContent = server?.settings.mode === "smart" && server.effective === "manual"
     ? `Now ${server.applied_speed} % · ${server.reason.replace(/^smart: /, "")}` : "";
   $("#fixed-out").innerHTML = `${draft.fixed_speed}<small> %</small>`;
-  if (document.activeElement !== $("#failsafe")) $("#failsafe").value = draft.failsafe_temp;
+  if (document.activeElement !== $("#failsafe")) $("#failsafe").value = Math.round(tv(draft.failsafe_temp));
   if (document.activeElement !== $("#ramp")) $("#ramp").value = draft.ramp_down_seconds;
   if (document.activeElement !== $("#min-speed")) $("#min-speed").value = draft.min_speed;
-  if (document.activeElement !== $("#exhaust-limit")) $("#exhaust-limit").value = draft.exhaust_limit ?? "";
-  $("#margin-text").textContent = draft.threshold_margin;
+  if (document.activeElement !== $("#exhaust-limit")) $("#exhaust-limit").value = draft.exhaust_limit == null ? "" : Math.round(tv(draft.exhaust_limit));
+  $("#margin-text").textContent = fmt(td(draft.threshold_margin));
   $$("#bmc-thr button").forEach(b => b.setAttribute("aria-pressed", b.dataset.thr === String(draft.bmc_thresholds)));
   $$("#dry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.dry === String(draft.dry_run)));
   $$("#quiet-on button").forEach(b => b.setAttribute("aria-pressed", b.dataset.quiet === String(draft.quiet.enabled)));
@@ -326,9 +328,9 @@ function touch() { dirty = true; renderControls(); }
 
 $$(".seg button").forEach(b => b.onclick = () => { draft.mode = b.dataset.mode; touch(); });
 $("#fixed").oninput = e => { draft.fixed_speed = +e.target.value; touch(); };
-$("#smart-target").oninput = e => { draft.smart_target = +e.target.value; touch(); };
+$("#smart-target").oninput = e => { draft.smart_target = fromT(+e.target.value); touch(); };
 $$("[data-preset]").forEach(b => b.onclick = () => { draft.fixed_speed = +b.dataset.preset; $("#fixed").value = draft.fixed_speed; touch(); });
-$("#failsafe").oninput = e => { const v = +e.target.value; if (v >= 40 && v <= 100) { draft.failsafe_temp = v; touch(); } };
+$("#failsafe").oninput = e => { const v = fromT(+e.target.value); if (v >= 40 && v <= 100) { draft.failsafe_temp = v; touch(); } };
 $("#ramp").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) && v >= 0 && v <= 600) { draft.ramp_down_seconds = v; touch(); } };
 $$("[data-pcie]").forEach(b => b.onclick = () => { draft.pcie_cooling = JSON.parse(b.dataset.pcie); touch(); });
 $$("[data-thr]").forEach(b => b.onclick = () => { draft.bmc_thresholds = b.dataset.thr === "true"; touch(); });
@@ -339,7 +341,7 @@ $("#quiet-end").onchange = e => { if (e.target.value) { draft.quiet = { ...draft
 $("#quiet-max").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) && v >= 0 && v <= 100) { draft.quiet = { ...draft.quiet, max_speed: v }; touch(); } };
 $("#min-speed").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) && v >= 0 && v <= 60) { draft.min_speed = v; touch(); } };
 $("#exhaust-limit").oninput = e => {
-  const raw = e.target.value.trim(), v = +raw;
+  const raw = e.target.value.trim(), v = fromT(+raw);
   if (raw === "") { draft.exhaust_limit = null; touch(); } else if (v >= 30 && v <= 90) { draft.exhaust_limit = v; touch(); }
 };
 $("#discard").onclick = () => { dirty = false; draft = structuredClone(server.settings); renderServer(); };
@@ -401,10 +403,10 @@ function renderCurve() {
   const pts = [...draft.curve].sort((a, b) => a[0] - b[0]), fs = draft.failsafe_temp;
   let g = `<defs><pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line y2="5" stroke="var(--accent)" stroke-opacity=".25"/></pattern></defs>`;
   for (let v = 0; v <= 100; v += 25) g += `<line class="g" x1="${P.l}" x2="${CW - P.r}" y1="${cy(v)}" y2="${cy(v)}"/><text x="${P.l - 6}" y="${cy(v) + 3.5}" text-anchor="end">${v}</text>`;
-  for (let t = 30; t <= 90; t += 10) g += `<text x="${cx(t)}" y="${CH - 8}" text-anchor="middle">${t}°</text>`;
+  for (let t = 30; t <= 90; t += 10) g += `<text x="${cx(t)}" y="${CH - 8}" text-anchor="middle">${fmt(tv(t))}°</text>`;
   g += `<rect x="${cx(fs)}" y="${P.t}" width="${Math.max(0, CW - P.r - cx(fs))}" height="${CH - P.t - P.b}" fill="url(#hatch)"/>
     <line class="fs" x1="${cx(fs)}" x2="${cx(fs)}" y1="${P.t}" y2="${CH - P.b}"/>
-    <text class="fs-text" x="${cx(fs) - 4}" y="${P.t + 10}" text-anchor="end">Auto ≥ ${fs}°</text>`;
+    <text class="fs-text" x="${cx(fs) - 4}" y="${P.t + 10}" text-anchor="end">Auto ≥ ${fmt(tv(fs))}°</text>`;
   const line = [[T_MIN, pts[0][1]], ...pts, [T_MAX, pts[pts.length - 1][1]]].map(([t, v]) => `${cx(t).toFixed(1)},${cy(v).toFixed(1)}`);
   g += `<polygon class="area" points="${cx(T_MIN)},${cy(0)} ${line.join(" ")} ${cx(T_MAX)},${cy(0)}"/><polyline class="line" points="${line.join(" ")}"/>`;
   const now = server?.cpu_temp;
@@ -412,7 +414,7 @@ function renderCurve() {
     const sp = curveSpeed(draft.curve, now);
     g += `<line class="now-l" x1="${cx(now)}" x2="${cx(now)}" y1="${cy(sp)}" y2="${CH - P.b}"/>
       <circle class="now" cx="${cx(now)}" cy="${cy(sp)}" r="4"/>
-      <text x="${cx(now) + 7}" y="${cy(sp) + 14}" style="fill:var(--accent)">${Math.round(now)}° → ${sp}%</text>`;
+      <text x="${cx(now) + 7}" y="${cy(sp) + 14}" style="fill:var(--accent)">${fmt(tv(now))}° → ${sp}%</text>`;
   }
   draft.curve.forEach((p, i) => g += `<g class="pt" data-i="${i}"><circle cx="${cx(p[0])}" cy="${cy(p[1])}" r="13" fill="transparent"/><circle cx="${cx(p[0])}" cy="${cy(p[1])}" r="4.5"/></g>`);
   $("#curve").innerHTML = g;
@@ -437,7 +439,7 @@ $("#curve").addEventListener("pointermove", e => {
   tip.style.display = "block";
   tip.style.left = cx(p[0]) / CW * r.width + "px";
   tip.style.top = cy(p[1]) / CH * r.height + "px";
-  tip.textContent = `${p[0]} °C → ${p[1]} %`;
+  tip.textContent = `${fmt(tv(p[0]))} ${tu()} → ${p[1]} %`;
   renderCurve();
 });
 const endDrag = () => {
@@ -499,7 +501,7 @@ function renderChart() {
     : time(t);
   let g = `<defs><pattern id="autoband" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line y2="6" stroke="var(--rule-2)"/></pattern></defs>`;
   for (let v = 0; v <= 100; v += 25) g += `<line class="grid-l" x1="${pl}" x2="${W - pr}" y1="${yS(v)}" y2="${yS(v)}"/><text x="${W - pr + 8}" y="${yS(v) + 4}">${v}%</text>`;
-  for (let v = 20; v <= 95; v += 15) g += `<text x="${pl - 8}" y="${yT(v) + 4}" text-anchor="end">${v}°</text>`;
+  for (let v = 20; v <= 95; v += 15) g += `<text x="${pl - 8}" y="${yT(v) + 4}" text-anchor="end">${fmt(tv(v))}°</text>`;
   const n = W < 520 ? 3 : 6;
   for (let i = 0; i <= n; i++) {
     const t = start + range * i / n;
@@ -542,8 +544,8 @@ $("#chart").addEventListener("pointermove", e => {
   c2.setAttribute("cx", X); c2.setAttribute("cy", fan != null ? chart.yS(fan) : -10);
   const tip = $("#tip");
   tip.innerHTML = `<div class="t">${range > 86400 ? new Date(p.t * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) : time(p.t, true)}${range > 10800 ? " · 5 min average" : ""}</div>
-    <div><span>CPU</span><span>${fmt(p.cpu)} °C</span></div>
-    <div><span>Exhaust</span><span>${fmt(p.exhaust)} °C</span></div>
+    <div><span>CPU</span><span>${fmt(tv(p.cpu))} ${tu()}</span></div>
+    <div><span>Exhaust</span><span>${fmt(tv(p.exhaust))} ${tu()}</span></div>
     <div><span>Fans</span><span>${fan == null ? "Automatic" : fan + " %"}</span></div>
     ${p.rpm != null ? `<div><span>Fan speed</span><span>${p.rpm.toLocaleString()} rpm</span></div>` : ""}
     <div><span>Power</span><span>${fmt(p.watts)} W</span></div>`;
@@ -666,7 +668,7 @@ $("#e-test").onclick = async () => {
     if (d.ok) {
       res.className = "result ok";
       res.innerHTML = `<b>Connected${d.model ? " to " + esc(d.model) : ""}.</b> ${d.temps} temperature sensors, ${d.fans} fans` +
-        (d.cpu != null ? `, CPU at ${fmt(d.cpu)} °C` : "") + (d.watts != null ? `, ${fmt(d.watts)} W` : "") + "." +
+        (d.cpu != null ? `, CPU at ${fmt(tv(d.cpu))} ${tu()}` : "") + (d.watts != null ? `, ${fmt(d.watts)} W` : "") + "." +
         (d.control ? "" : " Monitoring only.");
     } else {
       res.className = "result bad";
@@ -736,6 +738,12 @@ $("#bk-import").onclick = async () => {
 };
 
 // ---------------------------------------------------------------- shell
+$$(".tu").forEach(el => el.textContent = tu());  // static unit labels; the unit only changes with a reload
+$("#pref-lang").value = PREFS.lang;
+$("#pref-unit").value = PREFS.unit;
+$("#pref-lang").onchange = e => { PREFS.lang = e.target.value; savePrefs(); location.reload(); };
+$("#pref-unit").onchange = e => { PREFS.unit = e.target.value; savePrefs(); location.reload(); };
+
 $("#signout").onclick = async () => {
   await api("/api/logout", {});
   location.replace("/login");

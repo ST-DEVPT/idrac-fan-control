@@ -6,6 +6,7 @@
 <title>Fan Control</title>
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/style.css">
+<script src="/static/i18n.js"></script>
 </head>
 <body class="app">
 
@@ -27,6 +28,10 @@
   <div class="side-foot">
     <span id="version"></span>
     <span class="ro-badge">Read-only</span>
+    <span class="prefs">
+      <select id="pref-lang" aria-label="Language"><option value="en">EN</option><option value="pt">PT</option></select>
+      <select id="pref-unit" aria-label="Temperature unit"><option value="C">°C</option><option value="F">°F</option></select>
+    </span>
     <button class="linkish" id="signout" hidden>Sign out</button>
   </div>
 </aside>
@@ -82,8 +87,8 @@
       <div class="hd">
         <h2>History</h2>
         <div class="legend">
-          <span><i style="--c:var(--cool)"></i>CPU °C</span>
-          <span><i class="dash" style="--c:var(--ink-3)"></i>Exhaust °C</span>
+          <span><i style="--c:var(--cool)"></i>CPU <span class="tu">°C</span></span>
+          <span><i class="dash" style="--c:var(--ink-3)"></i>Exhaust <span class="tu">°C</span></span>
           <span><i style="--c:var(--accent)"></i>Fans %</span>
           <span id="legend-auto"><i class="box"></i>Automatic</span>
         </div>
@@ -146,14 +151,14 @@
       <div class="fields">
         <div class="f">
           <label for="failsafe">CPU failsafe<small>At or above this, the BMC takes back control</small></label>
-          <div class="num"><input type="number" id="failsafe" min="40" max="100" step="1"><span class="muted">°C</span></div>
+          <div class="num"><input type="number" id="failsafe" step="1"><span class="muted tu">°C</span></div>
         </div>
         <div class="f">
           <label for="exhaust-limit">Exhaust air limit<small>Hands over too when the air leaving the server gets this hot. Empty turns it off</small></label>
-          <div class="num"><input type="number" id="exhaust-limit" min="30" max="90" step="1" placeholder="off"><span class="muted">°C</span></div>
+          <div class="num"><input type="number" id="exhaust-limit" step="1" placeholder="off"><span class="muted tu">°C</span></div>
         </div>
         <div class="f">
-          <label>BMC warning thresholds<small>Hands over when any sensor (PCIe cards, disks, DIMMs…) is within <span id="margin-text">5</span> °C of the warning level its BMC defines</small></label>
+          <label>BMC warning thresholds<small>Hands over when any sensor (PCIe cards, disks, DIMMs…) is within <span id="margin-text">5</span> <span class="tu">°C</span> of the warning level its BMC defines</small></label>
           <div class="mini" role="group" aria-label="BMC warning thresholds" id="bmc-thr">
             <button data-thr="true">On</button><button data-thr="false">Off</button>
           </div>
@@ -210,7 +215,7 @@
     </section>
     <section>
       <div class="hd"><h2>Temperatures</h2><span class="aside" id="temp-count"></span></div>
-      <table><thead><tr><th>Sensor</th><th></th><th class="r">°C</th></tr></thead><tbody id="temps"></tbody></table>
+      <table><thead><tr><th>Sensor</th><th></th><th class="r tu">°C</th></tr></thead><tbody id="temps"></tbody></table>
     </section>
     <section>
       <div class="hd"><h2>Events</h2><span class="aside" id="updated"></span></div>
@@ -472,7 +477,7 @@
         </div>
         <div class="fld two">
           <div><label for="al-cooldown">Cooldown per alert</label><div class="unit"><input type="number" id="al-cooldown" min="0" max="1440"><span>min</span></div></div>
-          <div><label for="al-hot">"Running hot" at</label><div class="unit"><input type="number" id="al-hot" min="30" max="100"><span>°C</span></div></div>
+          <div><label for="al-hot">"Running hot" at</label><div class="unit"><input type="number" id="al-hot"><span class="al-tu">°C</span></div></div>
         </div>
       </div>
 

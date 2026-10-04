@@ -557,3 +557,8 @@ body.viewer .ro-badge { display: inline; }
 body.viewer .actions, body.viewer #s-edit, body.viewer .side-add, body.viewer a[href="#/add"],
 body.viewer .card.add, body.viewer .al-actions, body.viewer .curve-presets, body.viewer #test-alert { display: none !important; }
 body.viewer #control-body, body.viewer .alerts .al-grid, body.viewer .detect { pointer-events: none; opacity: .75; }
+
+/* language and unit */
+.prefs { display: inline-flex; gap: 4px; }
+.prefs select { padding: 1px 4px; border: 1px solid var(--rule-2); border-radius: 4px; background: transparent; color: var(--ink-2); font: 11.5px var(--sans); }
+.side-foot { flex-wrap: wrap; }

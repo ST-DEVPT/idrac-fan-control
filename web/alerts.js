@@ -64,7 +64,8 @@ function renderAlerts() {
   setIfIdle("#al-mention-id", mId);
   $("#al-mention-id").disabled = !["role", "user"].includes(mKind);
   setIfIdle("#al-cooldown", d.cooldown_minutes);
-  setIfIdle("#al-hot", d.hot_threshold);
+  setIfIdle("#al-hot", Math.round(tv(d.hot_threshold)));
+  $$(".al-tu").forEach(el => el.textContent = tu());
 
   $("#al-colors").innerHTML = Object.keys(LEVEL_NAMES).map(l =>
     `<label class="color"><input type="color" data-level="${l}" value="${esc(d.colors[l])}"><span>${LEVEL_NAMES[l]}</span></label>`).join("");
@@ -149,7 +150,7 @@ bindText("#al-avatar", "avatar_url", v => v.trim());
 $("#al-cooldown").addEventListener("input", e => { const n = +e.target.value; if (Number.isInteger(n) && n >= 0 && n <= 1440) { aDraft.cooldown_minutes = n; aTouch(); } });
 $("#al-report-min").addEventListener("input", e => { const n = +e.target.value; if (Number.isInteger(n) && n >= 5 && n <= 1440) { aDraft.report_minutes = n; aTouch(); } });
 $("#al-report-mode").onchange = e => { aDraft.report_mode = e.target.value; aTouch(); };
-$("#al-hot").addEventListener("input", e => { const n = +e.target.value; if (n >= 30 && n <= 100) { aDraft.hot_threshold = n; aTouch(); } });
+$("#al-hot").addEventListener("input", e => { const n = fromT(+e.target.value); if (n >= 30 && n <= 100) { aDraft.hot_threshold = n; aTouch(); } });
 $("#al-enabled").onchange = e => { aDraft.enabled = e.target.checked; aTouch(); };
 $("#al-details").onchange = e => { aDraft.details = e.target.checked; aTouch(); };
 $("#al-webhook").addEventListener("input", e => { const v = e.target.value.trim(); newWebhook = v || undefined; aTouch(); });

@@ -128,6 +128,7 @@ STATIC = {  # allowlist: nothing outside it is ever read from disk
     "embed.js": "text/javascript; charset=utf-8",
     "alerts.js": "text/javascript; charset=utf-8",
     "integrations.js": "text/javascript; charset=utf-8",
+    "i18n.js": "text/javascript; charset=utf-8",
     "grafana.json": "application/json",
     "icon.svg": "image/svg+xml",
     "fonts/archivo.woff2": "font/woff2",
