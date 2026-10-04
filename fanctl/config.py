@@ -9,6 +9,8 @@ sys.stdout.reconfigure(errors="replace")  # Windows consoles choke on ° and →
 
 VERSION = os.environ.get("APP_VERSION", "dev")
 WEB_PASSWORD = os.environ.get("WEB_PASSWORD", "")
+VIEW_PASSWORD = os.environ.get("VIEW_PASSWORD", "")   # optional read-only account
+TRUST_PROXY = os.environ.get("TRUST_PROXY", "").lower() in ("1", "true", "yes")  # believe X-Forwarded-For
 METRICS_TOKEN = os.environ.get("METRICS_TOKEN", "")
 EMBED_TOKEN = os.environ.get("EMBED_TOKEN", "")
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "")

@@ -24,29 +24,52 @@ KEY = b""  # set by app.main() once the data folder is known to be writable
 
 SESSION_SHORT = 12 * 3600
 SESSION_LONG = 30 * 86400
-login_lock = threading.Lock()
+LOGIN_WINDOW = 600     # seconds over which failed sign-ins are counted, per address
+LOGIN_ATTEMPTS = 5     # failures allowed in that window before the address has to wait
+failures = {}          # address -> times of recent failed sign-ins
+failures_lock = threading.Lock()
 
 
 def session_key():
-    """Signing key derived from a persisted random secret and the password, so changing
-    config.WEB_PASSWORD (or deleting data/secret) signs everyone out."""
+    """Signing key derived from a persisted random secret and the passwords, so changing
+    WEB_PASSWORD or VIEW_PASSWORD (or deleting data/secret) signs everyone out."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     f = DATA_DIR / "secret"
     if not f.exists():
         f.write_text(secrets.token_hex(32))
         f.chmod(0o600)
-    return hmac.new(bytes.fromhex(f.read_text().strip()), config.WEB_PASSWORD.encode(), hashlib.sha256).digest()
+    passwords = f"{config.WEB_PASSWORD}\0{config.VIEW_PASSWORD}".encode()
+    return hmac.new(bytes.fromhex(f.read_text().strip()), passwords, hashlib.sha256).digest()
 
 
-def make_token(key, ttl):
-    exp = str(int(time.time()) + ttl)
-    return f"{exp}.{hmac.new(key, exp.encode(), hashlib.sha256).hexdigest()}"
+def make_token(key, ttl, role="admin"):
+    body = f"{int(time.time()) + ttl}.{role}"
+    return f"{body}.{hmac.new(key, body.encode(), hashlib.sha256).hexdigest()}"
 
 
 def valid_token(key, token):
-    exp, _, sig = (token or "").partition(".")
-    good = hmac.new(key, exp.encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(sig.encode(), good.encode()) and exp.isdigit() and int(exp) > time.time()
+    """The role a session token grants ("admin" or "viewer"), or None if it is forged or expired."""
+    body, _, sig = (token or "").rpartition(".")
+    exp, _, role = body.partition(".")
+    good = hmac.new(key, body.encode(), hashlib.sha256).hexdigest()
+    if hmac.compare_digest(sig.encode(), good.encode()) and exp.isdigit() and int(exp) > time.time() \
+            and role in ("admin", "viewer"):
+        return role
+    return None
+
+
+def throttled(address, now=None):
+    """Seconds this address must wait before trying to sign in again, 0 if it may try now."""
+    now = now or time.time()
+    with failures_lock:
+        recent = [t for t in failures.get(address, []) if t > now - LOGIN_WINDOW]
+        failures[address] = recent
+        return int(recent[0] + LOGIN_WINDOW - now) + 1 if len(recent) >= LOGIN_ATTEMPTS else 0
+
+
+def failed(address):
+    with failures_lock:
+        failures.setdefault(address, []).append(time.time())
 
 
 def same_secret(given, expected):
@@ -131,11 +154,27 @@ class Handler(BaseHTTPRequestHandler):
                 return v
         return None
 
+    def role(self):
+        """"admin", "viewer" or None for the person behind this request."""
+        if not config.WEB_PASSWORD:
+            return "admin"
+        return valid_token(KEY, self.cookie("session"))
+
     def authed(self, read_only=False):
-        if not config.WEB_PASSWORD or valid_token(KEY, self.cookie("session")):
+        """GETs need a session of any role; changes need the admin role (see do_POST).
+        The embed token opens the widget's read-only views and nothing else."""
+        if self.role():
             return True
-        # the embed token opens the read-only views only, never a POST
         return read_only and same_secret(self.query.get("token", [""])[0], EMBED_TOKEN)
+
+    def client(self):
+        """The address to account sign-ins and changes to. X-Forwarded-For is only believed with
+        TRUST_PROXY, since anyone can send it."""
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        return forwarded.split(",")[0].strip() if config.TRUST_PROXY and forwarded else self.client_address[0]
+
+    def who(self):
+        return f"{self.role()} at {self.client()}"
 
     def send(self, code, body=b"", ctype="application/json", headers=(), frame=False):
         if not isinstance(body, bytes):
@@ -235,7 +274,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             return self.file(PAGES[path], "text/html; charset=utf-8")
         if path == "/api/overview":
-            return self.send(200, {"servers": [s.summary() for s in list(SERVERS.values())],
+            return self.send(200, {"servers": [s.summary() for s in list(SERVERS.values())], "role": self.role(),
                                    "drivers": [d.info() for d in DRIVERS.values()],
                                    "auth": bool(config.WEB_PASSWORD), "version": VERSION, "interval": INTERVAL,
                                    "alerts": bool(webhook_of(alert_config()))})
@@ -280,28 +319,37 @@ class Handler(BaseHTTPRequestHandler):
         if self.route == "/api/login":
             if not config.WEB_PASSWORD:
                 return self.send(200, {"ok": True})
-            # ponytail: one global lock + 1 s per failure caps guessing at ~1/s overall;
-            # per-client lockout if this is ever exposed to the internet
-            with login_lock:
-                if not same_secret(body.get("password", ""), config.WEB_PASSWORD):
-                    time.sleep(1)
-                    print(time.strftime("%H:%M:%S"), "WARN failed sign-in from",
-                          self.headers.get("X-Forwarded-For", self.client_address[0]), flush=True)
-                    return self.send(401, {"error": "Wrong password"})
+            address = self.client()
+            wait = throttled(address)
+            if wait:
+                return self.send(429, {"error": f"Too many attempts. Try again in {wait // 60 + 1} min."},
+                                 headers=[("Retry-After", str(wait))])
+            password = str(body.get("password", ""))
+            role = ("admin" if same_secret(password, config.WEB_PASSWORD)
+                    else "viewer" if same_secret(password, config.VIEW_PASSWORD) else None)
+            if not role:
+                failed(address)
+                time.sleep(1)
+                print(time.strftime("%H:%M:%S"), "WARN failed sign-in from", address, flush=True)
+                return self.send(401, {"error": "Wrong password"})
             ttl = SESSION_LONG if body.get("remember") else SESSION_SHORT
-            return self.send(200, {"ok": True}, headers=[
-                self.set_session(make_token(KEY, ttl), ttl if body.get("remember") else None)])
+            print(time.strftime("%H:%M:%S"), f"INFO {role} signed in from {address}", flush=True)
+            return self.send(200, {"ok": True, "role": role}, headers=[
+                self.set_session(make_token(KEY, ttl, role), ttl if body.get("remember") else None)])
         if self.route == "/api/logout":
             return self.send(200, {"ok": True}, headers=[self.set_session("", 0)])
 
         if not self.authed():
             return self.send(401, {"error": "sign in required"})
+        if self.role() != "admin":
+            return self.send(403, {"error": "this account can only look"})
         if self.route == "/api/alerts":
             try:
                 cfg = validate_alerts(body, alert_config())
             except (ValueError, TypeError, AttributeError) as e:
                 return self.send(400, {"error": str(e)})
             save_alerts(cfg)
+            print(time.strftime("%H:%M:%S"), f"INFO Discord settings changed by {self.who()}", flush=True)
             return self.send(200, public_alert_config(cfg))
         if self.route == "/api/test-alert":
             # tests the configuration being edited, before it is saved
@@ -342,6 +390,7 @@ class Handler(BaseHTTPRequestHandler):
                 cfg["id"] = unique_id(cfg["name"], SERVERS)
                 srv = start(cfg)
                 save_dashboard_servers()
+                srv.log(f"Added by {self.who()}")
             return self.send(201, srv.info())
         m = re.fullmatch(r"/api/servers/([a-z0-9-]+)(/delete)?", self.route)
         if m:
@@ -354,6 +403,7 @@ class Handler(BaseHTTPRequestHandler):
                 if m.group(2):
                     stop(srv, forget=True)
                     save_dashboard_servers()
+                    print(time.strftime("%H:%M:%S"), f"INFO {srv.name} removed by {self.who()}", flush=True)
                     return self.send(200, {"ok": True})
                 try:
                     cfg = validate_server(body, srv.cfg)
@@ -362,6 +412,7 @@ class Handler(BaseHTTPRequestHandler):
                 stop(srv)  # restart with the new address, credentials or driver
                 srv = start(cfg)
                 save_dashboard_servers()
+                srv.log(f"Connection settings changed by {self.who()}")
             return self.send(200, srv.info())
         if self.route != "/api/settings":
             return self.send(404, {"error": "not found"})
@@ -372,7 +423,7 @@ class Handler(BaseHTTPRequestHandler):
             s = validate_settings(body, srv.settings())
         except (ValueError, TypeError) as e:
             return self.send(400, {"error": str(e)})
-        srv.save_settings(s)
+        srv.save_settings(s, self.who())
         self.send(200, s)
 
     def test_server(self, body):

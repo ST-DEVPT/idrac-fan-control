@@ -550,3 +550,10 @@ a.btn.primary { color: var(--bg); }
 .detect input { padding: 7px 9px; border: 1px solid var(--rule-2); border-radius: 6px; background: var(--surface); color: var(--ink); font: 13px var(--sans); width: 160px; }
 .detect input:focus { outline: none; border-color: var(--ink); }
 #d-result { margin-top: 10px; max-width: 760px; }
+
+/* read-only account: everything visible, nothing to press */
+.ro-badge { display: none; padding: 1px 7px; border: 1px solid var(--rule-2); border-radius: 999px; font-size: 11px; }
+body.viewer .ro-badge { display: inline; }
+body.viewer .actions, body.viewer #s-edit, body.viewer .side-add, body.viewer a[href="#/add"],
+body.viewer .card.add, body.viewer .al-actions, body.viewer .curve-presets, body.viewer #test-alert { display: none !important; }
+body.viewer #control-body, body.viewer .alerts .al-grid, body.viewer .detect { pointer-events: none; opacity: .75; }

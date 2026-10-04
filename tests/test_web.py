@@ -12,7 +12,10 @@ from fanctl.server import SERVERS
 class Sessions(unittest.TestCase):
     def test_tokens(self):
         key = web.session_key()
-        self.assertTrue(web.valid_token(key, web.make_token(key, 60)))
+        self.assertEqual(web.valid_token(key, web.make_token(key, 60)), "admin")
+        self.assertEqual(web.valid_token(key, web.make_token(key, 60, "viewer")), "viewer")
+        forged = web.make_token(key, 60, "viewer").replace(".viewer.", ".admin.")
+        self.assertIsNone(web.valid_token(key, forged))                            # role can't be edited
         self.assertFalse(web.valid_token(key, web.make_token(key, -1)))              # expired
         self.assertFalse(web.valid_token(key, web.make_token(b"other", 60)))         # wrong key
         self.assertFalse(web.valid_token(key, ""))
@@ -28,7 +31,8 @@ class Sessions(unittest.TestCase):
             config.WEB_PASSWORD = real
 
 
-class HTTP(unittest.TestCase):
+class Base(unittest.TestCase):
+    """Starts the dashboard on a free port and signs in as admin."""
     @classmethod
     def setUpClass(cls):
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)
@@ -58,6 +62,9 @@ class HTTP(unittest.TestCase):
     def post(self, path, body=None, **kw):
         return self.req("POST", path, {} if body is None else body, {**self.cookie, **kw.get("headers", {})})
 
+
+
+class HTTP(Base):
     # ---- pages and headers
 
     def test_pages_need_sign_in(self):
@@ -192,3 +199,51 @@ class HTTP(unittest.TestCase):
         self.assertEqual(self.post("/api/servers/lab-box-2/delete")[0], 200)
         self.assertEqual(self.req("POST", "/api/servers", {"name": "x", "driver": "demo"})[0], 401)
         self.assertEqual(json.loads(server.SERVERS_FILE.read_text()), [])
+
+
+class Roles(Base):
+    """A read-only account sees everything and changes nothing."""
+
+    def test_viewer(self):
+        st, h, data = self.req("POST", "/api/login", {"password": "lookonly"})
+        self.assertEqual(json.loads(data)["role"], "viewer")
+        viewer = {"Cookie": h["Set-Cookie"].split(";")[0]}
+        st, _, data = self.req("GET", "/api/overview", headers=viewer)
+        self.assertEqual((st, json.loads(data)["role"]), (200, "viewer"))
+        self.assertEqual(self.req("GET", "/api/state?server=rack-a", headers=viewer)[0], 200)
+        self.assertEqual(self.req("POST", "/api/settings?server=rack-a", {"mode": "auto"}, viewer)[0], 403)
+        self.assertEqual(self.req("POST", "/api/servers", {"name": "x", "driver": "demo"}, viewer)[0], 403)
+        self.assertEqual(self.req("POST", "/api/alerts", {"enabled": False}, viewer)[0], 403)
+        self.assertEqual(json.loads(self.get("/api/overview")[2])["role"], "admin")
+
+    def test_changes_are_attributed(self):
+        self.post("/api/settings?server=rack-a", {"ramp_down_seconds": 30})
+        self.assertRegex(SERVERS["rack-a"].events[0]["msg"], r"Settings saved by admin at 127\.0\.0\.1")
+        self.post("/api/settings?server=rack-a", {"ramp_down_seconds": 60})
+
+    def test_throttling_is_per_address(self):
+        now = time.time()
+        web.failures.clear()
+        for _ in range(web.LOGIN_ATTEMPTS):
+            web.failures.setdefault("10.0.0.66", []).append(now)
+        self.assertGreater(web.throttled("10.0.0.66"), 0)
+        self.assertEqual(web.throttled("10.0.0.67"), 0)                  # someone else can still sign in
+        self.assertEqual(web.throttled("10.0.0.66", now + web.LOGIN_WINDOW + 1), 0)
+        web.failures["127.0.0.1"] = [now] * web.LOGIN_ATTEMPTS
+        st, h, _ = self.req("POST", "/api/login", {"password": "hunter2"})
+        self.assertEqual(st, 429)
+        self.assertIn("Retry-After", h)
+        web.failures.clear()
+
+    def test_forwarded_for_needs_trust_proxy(self):
+        web.failures.clear()
+        self.req("POST", "/api/login", {"password": "nope"}, {"X-Forwarded-For": "203.0.113.9"})
+        self.assertIn("127.0.0.1", web.failures)                         # the header was not believed
+        web.failures.clear()
+        config.TRUST_PROXY = True
+        try:
+            self.req("POST", "/api/login", {"password": "nope"}, {"X-Forwarded-For": "203.0.113.9, 10.0.0.1"})
+            self.assertIn("203.0.113.9", web.failures)
+        finally:
+            config.TRUST_PROXY = False
+            web.failures.clear()

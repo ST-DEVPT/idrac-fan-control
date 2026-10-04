@@ -64,6 +64,7 @@ function go() {
   $$(".side-nav a").forEach(a => a.setAttribute("aria-current", a.dataset.route === route.view));
   renderSide();
   if (route.view === "server") pollServer();
+  if (route.view === "edit" && overview?.role === "viewer") { location.hash = "#/"; return toast("This account can only look", true); }
   if (route.view === "edit") openEditor();
   if (route.view === "overview") renderOverview();
   if (["prometheus", "grafana", "homarr"].includes(route.view)) renderIntegration(route.view);
@@ -81,6 +82,7 @@ async function pollOverview() {
     if (r.status === 401) return location.replace("/login");
     overview = await r.json();
     $("#signout").hidden = !overview.auth;
+    document.body.classList.toggle("viewer", overview.role === "viewer");
     $("#version").textContent = /^\d/.test(overview.version) ? "v" + overview.version : overview.version;
     renderSide();
     if (route.view === "overview") renderOverview();

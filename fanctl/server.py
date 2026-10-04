@@ -59,11 +59,11 @@ class Server:
             s["mode"] = "auto"
         return s
 
-    def save_settings(self, s):
+    def save_settings(self, s, who=""):
         write_json(self.settings_file, s)
         with self.lock:
             self.window.clear()  # a new setting applies now, not after the ramp-down delay
-        self.log(f"Settings saved: mode {s['mode']}")
+        self.log(f"Settings saved{' by ' + who if who else ''}: mode {s['mode']}")
         notify(self, "settings_changed", mode=s["mode"], failsafe=s["failsafe_temp"])
         self.wake.set()
 
