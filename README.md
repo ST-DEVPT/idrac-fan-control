@@ -25,9 +25,15 @@ the iDRAC, so a homelab server can run quietly without cooking itself.
 | Variable | What it enables |
 | --- | --- |
 | `IDRAC_1_HOST`, `IDRAC_1_USERNAME`, `IDRAC_1_PASSWORD`, `IDRAC_1_NAME` (and `_2_`, `_3_`...) | Several servers in one dashboard |
-| `DISCORD_WEBHOOK_URL` | Alerts on failsafe, unreachable iDRAC, refused commands and recovery |
+| `DISCORD_WEBHOOK_URL` | Default Discord webhook for alerts (can also be pasted in the dashboard) |
 | `METRICS_TOKEN` | Prometheus metrics at `/metrics` with `Authorization: Bearer <token>`. Grafana dashboard: `docs/grafana/idrac-fan-control.json` |
 | `EMBED_TOKEN` | Read-only widget at `/embed?server=<id>&token=<token>&theme=dark` |
+
+**Discord alerts** are configured in the dashboard: webhook, bot name, avatar, footer, colours per level,
+mentions (@here, @everyone, a role or a user, only for the levels you pick), a cooldown, a "running hot"
+threshold, and which of nine events to send, each with its own title and message using placeholders such as
+`{server}`, `{cpu}`, `{speed}` and `{error}`. A live preview shows the message, and "Send test" posts it
+before you save. The webhook is stored in `/data/alerts.json` (mode 600) and never sent back to the browser.
 
 **Homarr:** add an *iFrame* widget with the `/embed` URL above, and an app tile pointing at the dashboard
 with its status check on `/healthz`.

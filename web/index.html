@@ -98,10 +98,6 @@
             <button data-pcie="null">Leave</button><button data-pcie="true">On</button><button data-pcie="false">Off</button>
           </div>
         </div>
-        <div class="f">
-          <label>Discord alerts<small id="alerts-note">Failsafe, unreachable iDRAC, refused commands</small></label>
-          <button class="inline-btn" id="test-alert" type="button">Send test</button>
-        </div>
       </div>
 
       <div class="actions">
@@ -111,6 +107,82 @@
       </div>
     </section>
   </div>
+
+  <section class="alerts" id="alerts">
+    <div class="hd">
+      <h2>Discord alerts</h2>
+      <span class="aside" id="al-status"></span>
+      <label class="switch"><input type="checkbox" id="al-enabled"><span>Alerts on</span></label>
+    </div>
+    <div class="al-grid">
+      <div class="al-col">
+        <h3>Connection</h3>
+        <div class="fld">
+          <label for="al-webhook">Webhook URL</label>
+          <div class="pair">
+            <input type="password" id="al-webhook" autocomplete="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/…">
+            <button class="inline-btn" id="al-clear" type="button" hidden>Remove</button>
+          </div>
+          <small id="al-webhook-note">Server Settings → Integrations → Webhooks → Copy Webhook URL</small>
+        </div>
+        <h3>Look</h3>
+        <div class="fld two">
+          <div><label for="al-username">Bot name</label><input id="al-username" maxlength="80"></div>
+          <div><label for="al-footer">Footer</label><input id="al-footer" maxlength="200"></div>
+        </div>
+        <div class="fld">
+          <label for="al-avatar">Avatar image URL</label>
+          <input id="al-avatar" placeholder="https://…/avatar.png" spellcheck="false">
+        </div>
+        <div class="fld">
+          <label>Colours</label>
+          <div class="colors" id="al-colors"></div>
+        </div>
+        <label class="check"><input type="checkbox" id="al-details"> Add CPU, fans and mode under each message</label>
+        <h3>Behaviour</h3>
+        <div class="fld two">
+          <div>
+            <label for="al-mention">Mention</label>
+            <select id="al-mention">
+              <option value="">Nobody</option><option value="here">@here</option><option value="everyone">@everyone</option>
+              <option value="role">A role…</option><option value="user">A user…</option>
+            </select>
+          </div>
+          <div><label for="al-mention-id">Role or user ID</label><input id="al-mention-id" inputmode="numeric" placeholder="Developer Mode → Copy ID"></div>
+        </div>
+        <div class="fld">
+          <label>Mention on</label>
+          <div class="levels" id="al-levels"></div>
+        </div>
+        <div class="fld two">
+          <div><label for="al-cooldown">Cooldown per alert</label><div class="unit"><input type="number" id="al-cooldown" min="0" max="1440"><span>min</span></div></div>
+          <div><label for="al-hot">"Running hot" at</label><div class="unit"><input type="number" id="al-hot" min="30" max="100"><span>°C</span></div></div>
+        </div>
+      </div>
+
+      <div class="al-col">
+        <h3>Events</h3>
+        <ul class="events" id="al-events"></ul>
+        <div class="editor">
+          <div class="fld"><label for="al-title">Title</label><input id="al-title" maxlength="256"></div>
+          <div class="fld"><label for="al-message">Message</label><textarea id="al-message" rows="4" maxlength="2000"></textarea></div>
+          <div class="chips" id="al-chips" aria-label="Insert a placeholder"></div>
+          <button class="inline-btn" id="al-reset" type="button">Reset this event's text</button>
+        </div>
+      </div>
+
+      <div class="al-col">
+        <h3>Preview</h3>
+        <div class="dc" id="al-preview"></div>
+        <div class="actions al-actions">
+          <span class="state" id="al-state">No changes</span>
+          <button class="btn" id="al-test" type="button">Send test</button>
+          <button class="btn" id="al-discard" type="button" disabled>Discard</button>
+          <button class="btn primary" id="al-save" type="button" disabled>Save</button>
+        </div>
+      </div>
+    </div>
+  </section>
 
   <div class="grid3">
     <section>
@@ -136,5 +208,6 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="/static/app.js"></script>
+<script src="/static/alerts.js"></script>
 </body>
 </html>

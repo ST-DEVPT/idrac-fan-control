@@ -6,7 +6,8 @@
 - Ramp-down delay: fans speed up at once and slow down only after demand stays lower.
 - Failsafe hysteresis: manual control resumes 3 °C below the failsafe temperature.
 - History and events survive restarts (`/data/history-<server>.json`).
-- Discord alerts (`DISCORD_WEBHOOK_URL`) for failsafe, unreachable iDRAC and refused commands.
+- Discord alerts, configured in the dashboard: webhook, bot name, avatar, footer, colours, mentions,
+  cooldown, nine events with editable title and message templates, live preview and test sends.
 - Prometheus `/metrics` (`METRICS_TOKEN`) and a Grafana dashboard in `docs/grafana`.
 - Read-only `/embed` widget for Homarr and other dashboards (`EMBED_TOKEN`).
 - Per-fan commands for 11th-generation servers that refuse the "all fans" selector.

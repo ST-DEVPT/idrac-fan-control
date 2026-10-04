@@ -145,6 +145,34 @@ copy = app.Server("rack-a", "Rack A", "demo", "", "")
 assert copy.load_history() and copy.history[-1]["t"] == a.history[-1]["t"]
 app.SERVERS["rack-b"].cycle()
 
+# ---------------------------------------------------------------- alerts
+
+HOOK = "https://discord.com/api/webhooks/123456789/abc-DEF_123"
+cfg = app.validate_alerts({"webhook_url": HOOK, "username": "Fans", "mention": "role:123456789012",
+                           "mention_levels": ["error", "warn"], "colors": {"warn": "#ABCDEF"},
+                           "events": {"hot": {"enabled": True, "title": "{server} hot {cpu}"}}},
+                          app.alert_config())
+assert app.webhook_of(cfg) == HOOK and cfg["colors"]["warn"] == "#abcdef" and cfg["events"]["hot"]["enabled"]
+pub = app.public_alert_config(cfg)
+assert "webhook_url" not in pub and HOOK not in json.dumps(pub) and pub["webhook"]["hint"] == "…_123"
+p = app.build_payload(cfg, "hot", {"server": "R1", "cpu": "70"})
+assert p["embeds"][0]["title"] == "R1 hot 70" and p["embeds"][0]["color"] == 0xABCDEF
+assert p["content"] == "<@&123456789012>" and p["allowed_mentions"] == {"parse": [], "roles": ["123456789012"]}
+p = app.build_payload(cfg, "recovered", {"server": "R1", "error": "@everyone"})   # "ok" level: no mention
+assert "content" not in p and p["allowed_mentions"] == {"parse": []}
+assert app.fill("{server.__class__} {x} {server}", {"server": "R1"}) == "{server.__class__} {x} R1"
+for bad in ({"webhook_url": "https://evil.example/api/webhooks/1/x"}, {"username": "My Discord bot"},
+            {"avatar_url": "http://insecure/img.png"}, {"mention": "@everyone"}, {"mention_levels": ["loud"]},
+            {"cooldown_minutes": -1}, {"colors": {"warn": "red"}}, {"events": {"nope": {}}},
+            {"events": {"hot": {"title": ""}}}, {"enabled": "yes"}):
+    try:
+        app.validate_alerts(bad, app.alert_config())
+        raise AssertionError(f"accepted {bad}")
+    except ValueError:
+        pass
+assert app.validate_alerts({"webhook_url": ""}, cfg)["webhook_url"] == ""            # "" clears it
+assert app.validate_alerts({"username": "x"}, cfg)["webhook_url"] == HOOK            # absent keeps it
+
 # ---------------------------------------------------------------- HTTP
 
 httpd = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
@@ -200,6 +228,14 @@ assert req("POST", "/api/settings?server=rack-b", {"fixed_speed": 500}, cookie)[
 assert req("POST", "/api/settings", {"mode": "dell"})[0] == 401
 assert req("POST", "/api/settings?server=rack-b", {"x": "y" * 20000}, cookie)[0] == 413
 assert req("POST", "/api/test-alert", {}, cookie)[0] == 400         # no webhook configured
+st, _, data = req("GET", "/api/alerts", headers=cookie)
+assert st == 200 and json.loads(data)["webhook"]["set"] is False
+assert req("GET", "/api/alerts?token=e-token")[0] == 401                # embed token can't read alerts
+st, _, data = req("POST", "/api/alerts", {"webhook_url": HOOK, "cooldown_minutes": 5}, cookie)
+assert st == 200 and HOOK not in data.decode() and json.loads(data)["cooldown_minutes"] == 5
+assert req("POST", "/api/alerts", {"webhook_url": "https://evil.example/x"}, cookie)[0] == 400
+assert req("POST", "/api/alerts", {"cooldown_minutes": 1}, {"Content-Type": "application/json"})[0] == 401
+assert req("POST", "/api/test-alert", {"kind": "nope"}, cookie)[0] == 400
 
 # embed token: read-only views only
 assert req("GET", "/embed")[0] == 401

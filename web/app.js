@@ -61,8 +61,6 @@ function render() {
   $("#server-tabs").innerHTML = s.servers.map(x => `<button class="srv" data-id="${esc(x.id)}" aria-current="${x.id === s.id}">
     <span class="dot ${x.error ? "bad" : x.failsafe ? "warn" : x.effective ? "ok" : ""}"></span>${esc(x.name)}
     <span class="t">${x.cpu_temp == null ? "—" : fmt(x.cpu_temp) + "°"} · ${x.effective === "dell" ? "auto" : x.applied_speed == null ? "—" : x.applied_speed + "%"}</span></button>`).join("");
-  $("#test-alert").disabled = !s.alerts;
-  $("#alerts-note").textContent = s.alerts ? "Failsafe, unreachable iDRAC, refused commands" : "Set DISCORD_WEBHOOK_URL to enable";
   $("#host").textContent = s.host === "local" ? "iDRAC local" : s.host === "demo" ? "simulated data" : `iDRAC ${s.host}`;
   const stale = !s.updated || Date.now() / 1000 - s.updated > s.interval * 3;
   $("#dot-link").className = "dot " + (s.error ? "bad" : stale ? "warn" : "ok");
@@ -168,10 +166,6 @@ $("#server-tabs").onclick = e => {
   sid = b.dataset.id; dirty = false; draft = null;
   history.replaceState(null, "", "#server=" + encodeURIComponent(sid));
   poll();
-};
-$("#test-alert").onclick = async () => {
-  const r = await fetch("/api/test-alert", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-  toast(r.ok ? "Test alert sent to Discord" : "Could not send: " + (await r.json()).error, !r.ok);
 };
 $$(".mini button").forEach(b => b.onclick = () => { draft.pcie_cooling = JSON.parse(b.dataset.pcie); touch(); });
 $("#discard").onclick = () => { dirty = false; draft = structuredClone(server.settings); render(); };
@@ -344,6 +338,6 @@ addEventListener("hashchange", () => {
   const next = new URLSearchParams(location.hash.slice(1)).get("server");
   if (next && next !== sid) { sid = next; dirty = false; draft = null; poll(); }
 });
-addEventListener("beforeunload", e => { if (dirty) e.preventDefault(); });
+addEventListener("beforeunload", e => { if (dirty || (typeof aDirty !== "undefined" && aDirty)) e.preventDefault(); });
 poll();
 setInterval(poll, 5000);

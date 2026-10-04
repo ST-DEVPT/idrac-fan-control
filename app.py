@@ -179,26 +179,211 @@ def write_json(path, data):
 
 # ---------------------------------------------------------------- alerts
 
-COLORS = {"error": 0xC0301C, "warn": 0xE4501B, "ok": 0x3B7A39, "info": 0x4F4D48}
+ALERTS_FILE = DATA_DIR / "alerts.json"
+WEBHOOK_RE = re.compile(r"https://(?:(?:ptb|canary)\.)?(?:discord|discordapp)\.com/api/webhooks/\d+/[\w-]+")
+LEVELS = ("error", "warn", "ok", "info")
+
+# kind: (level, default title, default message). {placeholders} are filled per alert.
+ALERT_KINDS = {
+    "failsafe":         ("warn",  "{server}: failsafe",            "CPU at {cpu}°C reached the {failsafe}°C failsafe. The iDRAC took over the fans."),
+    "failsafe_cleared": ("ok",    "{server}: failsafe cleared",    "CPU back to {cpu}°C. Manual fan control resumed."),
+    "hot":              ("warn",  "{server}: running hot",         "CPU at {cpu}°C, above the {threshold}°C warning. Fans at {speed}."),
+    "unreachable":      ("error", "{server}: iDRAC unreachable",   "{error}"),
+    "refused":          ("error", "{server}: fan command refused", "{error}\nThe iDRAC keeps control of the fans."),
+    "recovered":        ("ok",    "{server}: back to normal",      "The iDRAC is answering and accepting fan commands again."),
+    "controller_error": ("error", "{server}: controller error",    "{error}\nFans handed back to the iDRAC."),
+    "settings_changed": ("info",  "{server}: settings changed",    "Mode {mode}, failsafe {failsafe}°C."),
+    "started":          ("info",  "{server}: controller started",  "Watching {host} every {interval} s."),
+}
+PLACEHOLDERS = ("server", "host", "model", "cpu", "speed", "mode", "reason", "error", "failsafe", "threshold", "interval", "time")
+SAMPLE = {"server": "Rack A", "host": "192.168.1.120", "model": "PowerEdge R730", "cpu": "71", "speed": "45%",
+          "mode": "curve", "reason": "curve at 71°C", "error": "Unable to establish IPMI v2 / RMCP+ session",
+          "failsafe": "75", "threshold": "68", "interval": "15", "time": "12:00:00"}
+
+ALERT_DEFAULTS = {
+    "enabled": True,
+    "webhook_url": "",       # empty: fall back to the DISCORD_WEBHOOK_URL environment variable
+    "username": "iDRAC Fan Control",
+    "avatar_url": "",
+    "footer": "iDRAC Fan Control",
+    "details": True,         # add CPU / fans / mode fields under the message
+    "mention": "",           # "", "here", "everyone", "role:<id>", "user:<id>"
+    "mention_levels": ["error"],
+    "cooldown_minutes": 0,   # minimum gap between two alerts of the same kind for the same server
+    "hot_threshold": 68,
+    "colors": {"error": "#c0301c", "warn": "#e4501b", "ok": "#3b7a39", "info": "#4f4d48"},
+    "events": {k: {"enabled": k not in ("hot", "settings_changed", "started"), "title": t, "message": m}
+               for k, (_, t, m) in ALERT_KINDS.items()},
+}
+alert_lock = threading.Lock()
+last_alert = {}  # (server id, kind) -> time, for the cooldown
 
 
-def notify(title, message, level="info"):
-    """Post to the Discord webhook, in the background so a slow Discord never delays the fans."""
-    if not DISCORD_WEBHOOK:
+def alert_config():
+    try:
+        saved = json.loads(ALERTS_FILE.read_text())
+    except (OSError, ValueError):
+        saved = {}
+    cfg = {**ALERT_DEFAULTS, **{k: v for k, v in saved.items() if k in ALERT_DEFAULTS}}
+    cfg["colors"] = {**ALERT_DEFAULTS["colors"], **saved.get("colors", {})}
+    cfg["events"] = {k: {**ALERT_DEFAULTS["events"][k], **saved.get("events", {}).get(k, {})} for k in ALERT_KINDS}
+    return cfg
+
+
+def webhook_of(cfg):
+    url = cfg["webhook_url"] or DISCORD_WEBHOOK
+    return url if WEBHOOK_RE.fullmatch(url or "") else ""
+
+
+def public_alert_config(cfg):
+    """What the browser may see: everything except the webhook secret."""
+    own, env = cfg["webhook_url"], DISCORD_WEBHOOK if WEBHOOK_RE.fullmatch(DISCORD_WEBHOOK or "") else ""
+    shown = own or env
+    return {**{k: v for k, v in cfg.items() if k != "webhook_url"},
+            "webhook": {"set": bool(shown), "source": "dashboard" if own else "environment" if env else None,
+                        "hint": "…" + shown[-4:] if shown else ""},
+            "kinds": {k: lvl for k, (lvl, _, _) in ALERT_KINDS.items()}, "placeholders": PLACEHOLDERS,
+            "defaults": {k: {"title": t, "message": m} for k, (_, t, m) in ALERT_KINDS.items()}}
+
+
+def validate_alerts(new, current):
+    """Merge a partial update from the dashboard into the stored config, checking every field.
+    webhook_url: absent keeps the stored one, "" clears it, anything else must be a Discord webhook."""
+    cfg = json.loads(json.dumps(current))
+    for key in ("enabled", "details"):
+        if key in new:
+            if type(new[key]) is not bool:
+                raise ValueError(f"{key} must be true or false")
+            cfg[key] = new[key]
+    if "webhook_url" in new:
+        url = str(new["webhook_url"]).strip()
+        if url and not WEBHOOK_RE.fullmatch(url):
+            raise ValueError("webhook URL must look like https://discord.com/api/webhooks/<id>/<token>")
+        cfg["webhook_url"] = url
+    for key, limit in (("username", 80), ("footer", 200)):
+        if key in new:
+            v = str(new[key]).strip()
+            if len(v) > limit:
+                raise ValueError(f"{key} is limited to {limit} characters")
+            if key == "username" and ("discord" in v.lower() or not v):
+                raise ValueError("bot name cannot be empty or contain \"discord\" (Discord rejects it)")
+            cfg[key] = v
+    if "avatar_url" in new:
+        v = str(new["avatar_url"]).strip()
+        if v and not re.fullmatch(r"https://[^\s\"<>]{1,500}", v):
+            raise ValueError("avatar must be an https:// image URL")
+        cfg["avatar_url"] = v
+    if "mention" in new:
+        v = str(new["mention"]).strip()
+        if not re.fullmatch(r"|here|everyone|(role|user):\d{5,25}", v):
+            raise ValueError("mention must be empty, here, everyone, role:<id> or user:<id>")
+        cfg["mention"] = v
+    if "mention_levels" in new:
+        v = new["mention_levels"]
+        if not (isinstance(v, list) and all(x in LEVELS for x in v)):
+            raise ValueError(f"mention levels must be a list of {', '.join(LEVELS)}")
+        cfg["mention_levels"] = sorted(set(v), key=LEVELS.index)
+    if "cooldown_minutes" in new:
+        v = new["cooldown_minutes"]
+        if not (type(v) is int and 0 <= v <= 1440):
+            raise ValueError("cooldown must be a whole number of minutes from 0 to 1440")
+        cfg["cooldown_minutes"] = v
+    if "hot_threshold" in new:
+        v = new["hot_threshold"]
+        if not (type(v) in (int, float) and 30 <= v <= 100):
+            raise ValueError("temperature warning must be between 30 and 100 °C")
+        cfg["hot_threshold"] = v
+    for level, color in (new.get("colors") or {}).items():
+        if level not in LEVELS or not re.fullmatch(r"#[0-9a-fA-F]{6}", str(color)):
+            raise ValueError("colors must be #rrggbb for error, warn, ok and info")
+        cfg["colors"][level] = color.lower()
+    for kind, ev in (new.get("events") or {}).items():
+        if kind not in ALERT_KINDS or not isinstance(ev, dict):
+            raise ValueError(f"unknown alert {kind}")
+        if "enabled" in ev:
+            if type(ev["enabled"]) is not bool:
+                raise ValueError("event enabled must be true or false")
+            cfg["events"][kind]["enabled"] = ev["enabled"]
+        for key, limit in (("title", 256), ("message", 2000)):
+            if key in ev:
+                v = str(ev[key])
+                if not v.strip() or len(v) > limit:
+                    raise ValueError(f"{kind} {key} must be 1 to {limit} characters")
+                cfg["events"][kind][key] = v
+    return cfg
+
+
+def save_alerts(cfg):
+    write_json(ALERTS_FILE, cfg)
+    try:
+        ALERTS_FILE.chmod(0o600)  # holds the webhook token
+    except OSError:
+        pass
+
+
+def fill(template, values):
+    """Replace {name} placeholders. Deliberately not str.format, which would let a template
+    reach object attributes."""
+    return re.sub(r"\{(\w+)\}", lambda m: str(values.get(m.group(1), m.group(0))), template)
+
+
+def build_payload(cfg, kind, values):
+    level = ALERT_KINDS[kind][0]
+    ev = cfg["events"][kind]
+    embed = {"title": fill(ev["title"], values)[:256], "description": fill(ev["message"], values)[:4000],
+             "color": int(cfg["colors"][level][1:], 16), "timestamp": datetime.now(timezone.utc).isoformat()}
+    if cfg["footer"]:
+        embed["footer"] = {"text": fill(cfg["footer"], values)[:2048]}
+    if cfg["details"]:
+        embed["fields"] = [{"name": n, "value": str(values.get(k) or "—")[:1024], "inline": True}
+                           for n, k in (("CPU", "cpu"), ("Fans", "speed"), ("Mode", "mode"))]
+        embed["fields"][0]["value"] += "°C" if values.get("cpu") not in (None, "", "—") else ""
+    payload = {"username": cfg["username"], "embeds": [embed],
+               "allowed_mentions": {"parse": []}}  # text from the iDRAC can never ping anyone
+    m = cfg["mention"]
+    if m and level in cfg["mention_levels"]:
+        kind_, _, ident = m.partition(":")
+        payload["content"] = {"here": "@here", "everyone": "@everyone",
+                              "role": f"<@&{ident}>", "user": f"<@{ident}>"}[kind_]
+        payload["allowed_mentions"] = ({"parse": ["everyone"]} if not ident else
+                                       {"parse": [], ("roles" if kind_ == "role" else "users"): [ident]})
+    if cfg["avatar_url"]:
+        payload["avatar_url"] = cfg["avatar_url"]
+    return payload
+
+
+def post_webhook(url, payload):
+    req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
+                                 headers={"Content-Type": "application/json",
+                                          "User-Agent": f"idrac-fan-control/{VERSION}"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.status
+
+
+def notify(server, kind, **values):
+    """Send one alert in the background, so a slow Discord never delays the fans."""
+    cfg = alert_config()
+    url = webhook_of(cfg)
+    if not (url and cfg["enabled"] and cfg["events"][kind]["enabled"]):
         return
-    payload = {
-        "username": "iDRAC Fan Control",
-        "allowed_mentions": {"parse": []},  # error text must never ping @everyone
-        "embeds": [{"title": title[:256], "description": message[:2000], "color": COLORS[level],
-                    "timestamp": datetime.now(timezone.utc).isoformat()}],
-    }
+    key, now = (server.id, kind), time.time()
+    with alert_lock:
+        if now - last_alert.get(key, 0) < cfg["cooldown_minutes"] * 60:
+            return
+        last_alert[key] = now
+    st, s = server.state, server.settings()
+    base = {"server": server.name, "host": server.host, "model": st["model"] or "",
+            "cpu": "—" if st["cpu_temp"] is None else f"{st['cpu_temp']:.0f}",
+            "speed": "Dell automatic" if st["effective"] == "dell" else
+                     "—" if st["applied_speed"] is None else f"{st['applied_speed']}%",
+            "mode": s["mode"], "reason": st["reason"], "error": st["error"] or "",
+            "failsafe": s["failsafe_temp"], "threshold": cfg["hot_threshold"], "interval": INTERVAL,
+            "time": time.strftime("%H:%M:%S")}
+    payload = build_payload(cfg, kind, {**base, **values})
 
     def send():
-        req = urllib.request.Request(DISCORD_WEBHOOK, data=json.dumps(payload).encode(), method="POST",
-                                     headers={"Content-Type": "application/json",
-                                              "User-Agent": f"idrac-fan-control/{VERSION}"})
         try:
-            urllib.request.urlopen(req, timeout=10).close()
+            post_webhook(url, payload)
         except Exception as e:
             print("Discord webhook failed:", e, flush=True)
 
@@ -220,6 +405,7 @@ class Server:
         self.events = deque(maxlen=100)
         self.window = deque()  # (time, target) pairs for the ramp-down delay
         self.fan_ids = None    # None: the 0xff broadcast works; list: per-fan identifiers
+        self.hot = False       # above the "running hot" alert threshold
         self.saved = time.time()
         self.state = {"sensors": None, "cpu_temp": None, "effective": None, "applied_speed": None,
                       "target_speed": None, "reason": "", "failsafe": False, "error": None,
@@ -238,6 +424,7 @@ class Server:
         with self.lock:
             self.window.clear()  # a new setting applies now, not after the ramp-down delay
         self.log(f"Settings saved: mode {s['mode']}")
+        notify(self, "settings_changed", mode=s["mode"], failsafe=s["failsafe_temp"])
         self.wake.set()
 
     def load_history(self):
@@ -372,7 +559,7 @@ class Server:
                 if self.state["error"] != str(e):
                     self.log(f"iDRAC unreachable: {e}", "error")
                     if self.state["error"] is None:
-                        notify(f"{self.name}: iDRAC unreachable", str(e), "error")
+                        notify(self, "unreachable", error=str(e))
                 self.state.update(error=str(e), updated=time.time())
             return
 
@@ -408,6 +595,8 @@ class Server:
                 self.log(f"Third-party PCIe cooling command refused: {e}", "error")
             self.state["pcie_applied"] = settings["pcie_cooling"]  # tried once per change, not every cycle
 
+        vals = {"cpu": "—" if cpu is None else f"{cpu:.0f}", "reason": reason, "error": error or "",
+                "speed": "Dell automatic" if effective == "dell" else f"{speed}%"}
         with self.lock:
             prev = self.state
             if (effective, speed) != (prev["effective"], prev["applied_speed"]):
@@ -415,16 +604,21 @@ class Server:
                          "warn" if failsafe or error else "info")
             if prev["error"] and not error:
                 self.log("iDRAC responding again", "info")
-                notify(f"{self.name}: back to normal", "The iDRAC is answering and accepting fan commands again.", "ok")
+                notify(self, "recovered", **vals)
             if error and error != prev["error"]:
                 self.log(error, "error")
-                notify(f"{self.name}: fan command refused", f"{error}\nThe iDRAC keeps control of the fans.", "error")
+                notify(self, "refused", **vals)
             if failsafe and not was_failsafe:
-                notify(f"{self.name}: failsafe", f"{reason[0].upper()}{reason[1:]}. The iDRAC took over the fans.", "warn")
+                notify(self, "failsafe", **vals)
             if was_failsafe and not failsafe:
                 self.log(f"Failsafe cleared at CPU {cpu:.0f}°C" if cpu is not None else "Failsafe cleared")
-                notify(f"{self.name}: failsafe cleared", f"CPU back to {cpu:.0f}°C, manual control resumed."
-                       if cpu is not None else "Manual control resumed.", "ok")
+                notify(self, "failsafe_cleared", **vals)
+            threshold = alert_config()["hot_threshold"]
+            if cpu is not None and cpu >= threshold and not self.hot:
+                self.hot = True
+                notify(self, "hot", **vals)
+            elif cpu is None or cpu < threshold - 3:
+                self.hot = False
             self.state.update(sensors=sensors, cpu_temp=cpu, effective=effective, applied_speed=speed,
                               target_speed=target, reason=reason, failsafe=failsafe, error=error,
                               updated=time.time(), power=power)
@@ -449,12 +643,13 @@ class Server:
                                             if line.strip().startswith("Product Name")), None)
             except IPMIError:
                 pass  # cosmetic only
+        notify(self, "started")
         while True:
             try:
                 self.cycle()
             except Exception as e:  # never let a bug kill the loop and leave fans pinned low
                 self.log(f"Controller error: {e!r}; handing fans back to Dell", "error")
-                notify(f"{self.name}: controller error", f"{e!r}\nFans handed back to the iDRAC.", "error")
+                notify(self, "controller_error", error=repr(e))
                 try:
                     self.set_dell_auto()
                 except IPMIError:
@@ -573,13 +768,14 @@ STATIC = {  # allowlist: nothing outside it is ever read from disk
     "app.js": "text/javascript; charset=utf-8",
     "login.js": "text/javascript; charset=utf-8",
     "embed.js": "text/javascript; charset=utf-8",
+    "alerts.js": "text/javascript; charset=utf-8",
     "icon.svg": "image/svg+xml",
     "fonts/archivo.woff2": "font/woff2",
     "fonts/plex-mono-400.woff2": "font/woff2",
     "fonts/plex-mono-500.woff2": "font/woff2",
 }
 PAGES = {"/": "index.html", "/login": "login.html", "/embed": "embed.html"}
-CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
        "font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; object-src 'none'")
 
 
@@ -683,12 +879,14 @@ class Handler(BaseHTTPRequestHandler):
             with srv.lock:
                 return self.send(200, {**srv.state, "id": srv.id, "name": srv.name, "host": srv.host,
                                        "interval": INTERVAL, "auth": bool(WEB_PASSWORD),
-                                       "alerts": bool(DISCORD_WEBHOOK), "version": VERSION,
+                                       "alerts": bool(webhook_of(alert_config())), "version": VERSION,
                                        "settings": srv.settings(), "history": list(srv.history),
                                        "events": list(srv.events),
                                        "servers": [s.summary() for s in SERVERS.values()]})
         if not self.authed():
             return self.redirect("/login") if path == "/" else self.send(401, {"error": "sign in required"})
+        if path == "/api/alerts":
+            return self.send(200, public_alert_config(alert_config()))
         if path == "/":
             return self.file(PAGES[path], "text/html; charset=utf-8")
         self.send(404, {"error": "not found"})
@@ -731,10 +929,29 @@ class Handler(BaseHTTPRequestHandler):
 
         if not self.authed():
             return self.send(401, {"error": "sign in required"})
+        if self.route == "/api/alerts":
+            try:
+                cfg = validate_alerts(body, alert_config())
+            except (ValueError, TypeError, AttributeError) as e:
+                return self.send(400, {"error": str(e)})
+            save_alerts(cfg)
+            return self.send(200, public_alert_config(cfg))
         if self.route == "/api/test-alert":
-            if not DISCORD_WEBHOOK:
-                return self.send(400, {"error": "DISCORD_WEBHOOK_URL is not set"})
-            notify("Test alert", "Alerts from iDRAC Fan Control reach this channel.", "info")
+            # tests the configuration being edited, before it is saved
+            try:
+                cfg = validate_alerts(body.get("config") or {}, alert_config())
+            except (ValueError, TypeError, AttributeError) as e:
+                return self.send(400, {"error": str(e)})
+            kind = body.get("kind", "failsafe")
+            url = webhook_of(cfg)
+            if kind not in ALERT_KINDS or not url:
+                return self.send(400, {"error": "unknown alert" if url else "no Discord webhook configured"})
+            payload = build_payload(cfg, kind, SAMPLE)
+            payload["embeds"][0]["title"] = "[test] " + payload["embeds"][0]["title"][:249]
+            try:
+                post_webhook(url, payload)
+            except Exception as e:
+                return self.send(502, {"error": f"Discord answered: {e}"})
             return self.send(200, {"ok": True})
         if self.route != "/api/settings":
             return self.send(404, {"error": "not found"})
@@ -766,9 +983,8 @@ if not data_dir_writable():
 SERVERS = load_servers()
 KEY = session_key() if WEB_PASSWORD else b""
 
-if DISCORD_WEBHOOK and not re.match(r"https://(discord|discordapp)\.com/api/webhooks/", DISCORD_WEBHOOK):
-    print("WARNING: DISCORD_WEBHOOK_URL is not a Discord webhook URL; alerts disabled", flush=True)
-    DISCORD_WEBHOOK = ""
+if DISCORD_WEBHOOK and not WEBHOOK_RE.fullmatch(DISCORD_WEBHOOK):
+    print("WARNING: DISCORD_WEBHOOK_URL is not a Discord webhook URL; it is ignored", flush=True)
 
 
 def shutdown(*_):
