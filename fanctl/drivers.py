@@ -320,7 +320,10 @@ class SameOriginRedirect(urllib.request.HTTPRedirectHandler):
         old, new = urllib.parse.urlsplit(req.full_url), urllib.parse.urlsplit(newurl)
         if (new.scheme, new.netloc) != (old.scheme, old.netloc):
             return None
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        # 308 is 307 made permanent; urllib only learnt it in Python 3.11
+        return super().redirect_request(req, fp, 307 if code == 308 else code, msg, headers, newurl)
+
+    http_error_308 = urllib.request.HTTPRedirectHandler.http_error_302
 
 
 class RedfishDriver(Driver):
