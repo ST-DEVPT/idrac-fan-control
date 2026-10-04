@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iDRAC Fan Control</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="embed">
+<div class="emb">
+  <div class="head"><span class="dot" id="dot"></span><b id="name">—</b><span class="mode" id="mode">—</span></div>
+  <div class="nums">
+    <div class="n"><label>CPU</label><div id="cpu">—</div></div>
+    <div class="n"><label>Fans</label><div id="fans">—</div></div>
+    <div class="n"><label>Power</label><div id="watts">—</div></div>
+  </div>
+  <svg id="spark" aria-hidden="true"></svg>
+  <div class="row"><span>Inlet <b id="inlet">—</b> · Exhaust <b id="exhaust">—</b></span><span id="rpm"></span></div>
+</div>
+<script src="/static/embed.js"></script>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iDRAC Fan Control</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <div class="id">
+      <h1 id="model">Server</h1>
+      <span id="host">—</span>
+    </div>
+    <div class="meta">
+      <span><span class="dot" id="dot-power"></span><span id="power">—</span></span>
+      <span><span class="dot" id="dot-link"></span><span id="link">Connecting…</span></span>
+      <span>Mode <b id="mode-now">—</b></span>
+      <button class="signout" id="signout" hidden>Sign out</button>
+    </div>
+  </div>
+</header>
+<nav class="servers" id="servers" hidden aria-label="Servers"><div class="wrap" id="server-tabs"></div></nav>
+<div class="alert" id="alert" role="alert"><div class="wrap"><b id="alert-title"></b><span id="alert-msg"></span></div></div>
+
+<main class="wrap">
+  <div class="readouts">
+    <div class="ro"><div class="lbl">CPU <em id="cpu-name"></em></div><div class="v" id="v-cpu">—</div><div class="sub" id="s-cpu"></div><svg class="spark" id="sp-cpu"></svg></div>
+    <div class="ro"><div class="lbl">Fans</div><div class="v" id="v-speed">—</div><div class="sub" id="s-speed"></div><svg class="spark" id="sp-speed"></svg></div>
+    <div class="ro"><div class="lbl">Average speed</div><div class="v" id="v-rpm">—</div><div class="sub" id="s-rpm"></div><svg class="spark" id="sp-rpm"></svg></div>
+    <div class="ro"><div class="lbl">Inlet air</div><div class="v" id="v-inlet">—</div><div class="sub">ambient temperature</div><svg class="spark" id="sp-inlet"></svg></div>
+    <div class="ro"><div class="lbl">Exhaust air</div><div class="v" id="v-exhaust">—</div><div class="sub" id="s-exhaust"></div><svg class="spark" id="sp-exhaust"></svg></div>
+    <div class="ro"><div class="lbl">Power draw</div><div class="v" id="v-watts">—</div><div class="sub" id="s-watts"></div><svg class="spark" id="sp-watts"></svg></div>
+  </div>
+
+  <div class="grid">
+    <section>
+      <div class="hd">
+        <h2>History</h2>
+        <div class="legend">
+          <span><i style="--c:var(--cool)"></i>CPU °C</span>
+          <span><i class="dash" style="--c:var(--ink-3)"></i>Exhaust °C</span>
+          <span><i style="--c:var(--accent)"></i>Fans %</span>
+          <span><i class="box"></i>Dell control</span>
+        </div>
+        <div class="aside tabs" role="group" aria-label="Time range">
+          <button data-range="900">15 min</button><button data-range="3600" aria-pressed="true">1 h</button><button data-range="10800">3 h</button>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <svg id="chart" aria-label="Temperature and fan history chart"></svg>
+        <div class="tip" id="tip"></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="hd"><h2>Control</h2><span class="aside" id="applied"></span></div>
+      <div class="seg" role="group" aria-label="Mode">
+        <button data-mode="dell">Dell</button><button data-mode="fixed">Fixed</button><button data-mode="curve">Curve</button>
+      </div>
+
+      <div class="panel" data-panel="dell">
+        <p class="help">The iDRAC sets fan speed with its factory profile. Louder, but no surprises. This is also where the controller falls back whenever something goes wrong.</p>
+      </div>
+      <div class="panel" data-panel="fixed">
+        <p class="help">Every fan at the same speed, as long as the CPU stays below the failsafe temperature.</p>
+        <div class="slider">
+          <input type="range" id="fixed" min="0" max="100" step="1" aria-label="Fixed speed">
+          <output id="fixed-out">—</output>
+        </div>
+        <div class="presets">
+          <button data-preset="10">10 %</button><button data-preset="20">20 %</button><button data-preset="30">30 %</button><button data-preset="50">50 %</button><button data-preset="75">75 %</button>
+        </div>
+      </div>
+      <div class="panel" data-panel="curve">
+        <p class="help">Drag the points. Double-click empty space to add a point, or a point to remove it.</p>
+        <div class="curve-box" id="curve-box">
+          <svg id="curve" viewBox="0 0 400 230"></svg>
+          <div class="curve-tip" id="curve-tip"></div>
+        </div>
+      </div>
+
+      <div class="fields">
+        <div class="f">
+          <label for="failsafe">Failsafe temperature<small>At or above this, the iDRAC takes back control</small></label>
+          <div class="num"><input type="number" id="failsafe" min="40" max="100" step="1"><span class="muted">°C</span></div>
+        </div>
+        <div class="f">
+          <label for="ramp">Ramp-down delay<small>Fans speed up at once, slow down after this long</small></label>
+          <div class="num"><input type="number" id="ramp" min="0" max="600" step="5"><span class="muted">s</span></div>
+        </div>
+        <div class="f">
+          <label>Third-party PCIe cards<small>Dell's default cooling response</small></label>
+          <div class="mini" role="group" aria-label="Third-party PCIe cards">
+            <button data-pcie="null">Leave</button><button data-pcie="true">On</button><button data-pcie="false">Off</button>
+          </div>
+        </div>
+        <div class="f">
+          <label>Discord alerts<small id="alerts-note">Failsafe, unreachable iDRAC, refused commands</small></label>
+          <button class="inline-btn" id="test-alert" type="button">Send test</button>
+        </div>
+      </div>
+
+      <div class="actions">
+        <span class="state" id="save-state">No changes</span>
+        <button class="btn" id="discard" disabled>Discard</button>
+        <button class="btn primary" id="save" disabled>Apply</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="grid3">
+    <section>
+      <div class="hd"><h2>Fans</h2><span class="aside" id="fan-count"></span></div>
+      <table><thead><tr><th>Sensor</th><th></th><th class="r">RPM</th></tr></thead><tbody id="fans"></tbody></table>
+    </section>
+    <section>
+      <div class="hd"><h2>Temperatures</h2><span class="aside" id="temp-count"></span></div>
+      <table><thead><tr><th>Sensor</th><th></th><th class="r">°C</th></tr></thead><tbody id="temps"></tbody></table>
+    </section>
+    <section>
+      <div class="hd"><h2>Events</h2><span class="aside" id="updated"></span></div>
+      <div class="log-scroll"><table class="log"><tbody id="log"></tbody></table></div>
+    </section>
+  </div>
+
+  <footer>
+    <span>Uses Dell's OEM IPMI fan commands. Supported on iDRAC 6, 7, 8 and iDRAC 9 up to firmware 3.30.30.30.</span>
+    <span><a href="https://github.com/ST-DEVPT/idrac-fan-control" target="_blank" rel="noopener">idrac-fan-control</a> <span id="version"></span></span>
+  </footer>
+</main>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -20,6 +20,23 @@ the iDRAC, so a homelab server can run quietly without cooking itself.
 - Sign-in page with a single password, event log, light and dark themes, works on a phone.
 - One Python file, standard library only. The image is `python:alpine` plus `ipmitool`.
 
+## Integrations
+
+| Variable | What it enables |
+| --- | --- |
+| `IDRAC_1_HOST`, `IDRAC_1_USERNAME`, `IDRAC_1_PASSWORD`, `IDRAC_1_NAME` (and `_2_`, `_3_`...) | Several servers in one dashboard |
+| `DISCORD_WEBHOOK_URL` | Alerts on failsafe, unreachable iDRAC, refused commands and recovery |
+| `METRICS_TOKEN` | Prometheus metrics at `/metrics` with `Authorization: Bearer <token>`. Grafana dashboard: `docs/grafana/idrac-fan-control.json` |
+| `EMBED_TOKEN` | Read-only widget at `/embed?server=<id>&token=<token>&theme=dark` |
+
+**Homarr:** add an *iFrame* widget with the `/embed` URL above, and an app tile pointing at the dashboard
+with its status check on `/healthz`.
+
+<img alt="Embed widget" src="docs/embed.jpg" width="380">
+
+**Upgrading from 1.0:** the container now runs as uid 1000. Run `chown -R 1000:1000` on the data folder.
+For `IDRAC_HOST=local`, add `user: "0:0"` so the container can open `/dev/ipmi0`.
+
 ## Compatibility
 
 The dashboard uses Dell's OEM IPMI raw commands for fan control. Whether a server accepts them
@@ -112,7 +129,7 @@ IDRAC_HOST=demo python app.py   # dashboard on http://localhost:8080 with simula
 python test_app.py              # self-check
 ```
 
-Python 3.9 or newer, no dependencies.
+Python 3.10 or newer, no dependencies.
 
 ## License
 

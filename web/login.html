@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · iDRAC Fan Control</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login">
+<main>
+  <form class="box" id="form">
+    <div class="mark"><img src="/static/icon.svg" alt=""><span>iDRAC Fan Control</span></div>
+    <h1>Sign in</h1>
+    <p>This dashboard controls the server's fans.</p>
+    <label for="password">Password</label>
+    <input type="password" id="password" autocomplete="current-password" required autofocus>
+    <label class="check"><input type="checkbox" id="remember"> Keep me signed in for 30 days</label>
+    <button id="submit">Sign in</button>
+    <div class="error" id="error" role="alert"></div>
+  </form>
+</main>
+<footer>The password is set with the WEB_PASSWORD environment variable.</footer>
+<script src="/static/login.js"></script>
+</body>
+</html>

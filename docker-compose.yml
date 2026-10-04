@@ -6,13 +6,16 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./data:/data
+      - ./data:/data              # owned by uid 1000: mkdir data && chown 1000:1000 data
     environment:
-      IDRAC_HOST: 192.168.1.120     # iDRAC IP or hostname, "local", or "demo"
+      IDRAC_HOST: 192.168.1.120   # iDRAC IP or hostname, "local", or "demo"
       IDRAC_USERNAME: root
       IDRAC_PASSWORD: calvin
-      WEB_PASSWORD: change-me       # dashboard password; leave empty to disable sign-in
-      CHECK_INTERVAL: 15            # seconds between readings
-    # For IDRAC_HOST: local (container running on the server itself):
-    # devices:
-    #   - /dev/ipmi0:/dev/ipmi0
+      WEB_PASSWORD: change-me     # dashboard password; leave empty to disable sign-in
+      CHECK_INTERVAL: 15          # seconds between readings (minimum 5)
+      # DISCORD_WEBHOOK_URL: https://discord.com/api/webhooks/...
+      # METRICS_TOKEN: a-long-random-string   # Prometheus: Authorization: Bearer <token>
+      # EMBED_TOKEN: another-random-string    # read-only widget for Homarr and similar
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
