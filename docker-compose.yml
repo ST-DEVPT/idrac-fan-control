@@ -10,6 +10,7 @@ services:
     environment:
       WEB_PASSWORD: change-me     # dashboard password; leave empty to disable sign-in
       CHECK_INTERVAL: 15          # seconds between readings (minimum 5)
+      TZ: Europe/Lisbon           # time zone for quiet hours and the event log
       # Servers are added in the dashboard. They can also be declared here, which makes
       # them read-only in the dashboard:
       # SERVER_1_NAME: Rack A

@@ -531,3 +531,11 @@ a.btn.primary { color: var(--bg); }
 /* warning threshold marker on temperature bars */
 .meter.has-warn { position: relative; overflow: visible; }
 .warn-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--bad); opacity: .7; }
+
+/* quiet hours */
+.quiet { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.quiet-fields { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.quiet-fields.off { opacity: .4; }
+.quiet-fields input[type=time] { padding: 4px 6px; border: 1px solid var(--rule-2); border-radius: 5px; background: var(--surface); color: var(--ink); font: 13px var(--sans); }
+.quiet-fields .num input { width: 54px; }
+.quiet-row { flex-wrap: wrap; }

@@ -156,6 +156,19 @@
           <label for="ramp">Ramp-down delay<small>Fans speed up at once, slow down after this long</small></label>
           <div class="num"><input type="number" id="ramp" min="0" max="600" step="5"><span class="muted">s</span></div>
         </div>
+        <div class="f quiet-row">
+          <label>Quiet hours<small>Caps the fan speed overnight. The failsafe still applies at any hour</small></label>
+          <div class="quiet">
+            <div class="mini" role="group" aria-label="Quiet hours" id="quiet-on">
+              <button data-quiet="false">Off</button><button data-quiet="true">On</button>
+            </div>
+            <span class="quiet-fields" id="quiet-fields">
+              <input type="time" id="quiet-start" aria-label="Quiet hours start"> –
+              <input type="time" id="quiet-end" aria-label="Quiet hours end">
+              <span class="num">max <input type="number" id="quiet-max" min="0" max="100" aria-label="Quiet hours maximum speed"><span class="muted">%</span></span>
+            </span>
+          </div>
+        </div>
         <div class="f">
           <label>Dry run<small>Decide and log what would be sent, but leave the fans to the BMC</small></label>
           <div class="mini" role="group" aria-label="Dry run" id="dry">

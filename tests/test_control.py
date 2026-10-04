@@ -128,3 +128,28 @@ class Smart(unittest.TestCase):
         self.assertEqual(validate_settings({"mode": "smart"}, dict(DEFAULT_SETTINGS))["mode"], "smart")
         with self.assertRaises(ValueError):
             validate_settings({"mode": "smart", "smart_target": 74}, dict(DEFAULT_SETTINGS))  # failsafe 75
+
+
+class QuietHours(unittest.TestCase):
+    def at(self, hhmm):
+        import time
+        return time.struct_time((2026, 1, 1, int(hhmm[:2]), int(hhmm[3:]), 0, 0, 1, -1))
+
+    def test_window_across_midnight(self):
+        from fanctl.control import quiet_cap
+        q = {"enabled": True, "start": "23:00", "end": "07:00", "max_speed": 25}
+        self.assertEqual([quiet_cap(q, self.at(t)) for t in ("22:59", "23:00", "03:00", "06:59", "07:00")],
+                         [None, 25, 25, 25, None])
+        self.assertIsNone(quiet_cap({**q, "enabled": False}, self.at("03:00")))
+
+    def test_window_within_a_day(self):
+        from fanctl.control import quiet_cap
+        q = {"enabled": True, "start": "09:00", "end": "17:30", "max_speed": 30}
+        self.assertEqual([quiet_cap(q, self.at(t)) for t in ("08:59", "12:00", "17:30")], [None, 30, None])
+
+    def test_validation(self):
+        good = {"enabled": True, "start": "22:30", "end": "06:00", "max_speed": 20}
+        self.assertEqual(validate_settings({"quiet": good}, dict(DEFAULT_SETTINGS))["quiet"], good)
+        for bad in ({**good, "start": "24:00"}, {**good, "max_speed": 120}, {**good, "extra": 1}, "on"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_settings({"quiet": bad}, dict(DEFAULT_SETTINGS))

@@ -1,7 +1,8 @@
 FROM python:3.13-alpine
 
 # ipmitool: Dell, Supermicro and generic IPMI. openssh-client + sshpass: HPE iLO 4 with unlocked firmware.
-RUN apk add --no-cache ipmitool openssh-client sshpass \
+# tzdata: quiet hours follow the TZ variable.
+RUN apk add --no-cache ipmitool openssh-client sshpass tzdata \
  && adduser -D -H -u 1000 app \
  && mkdir /data && chown app:app /data
 

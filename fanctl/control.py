@@ -1,5 +1,7 @@
 """Fan control decisions: pure functions, no I/O, so they are easy to test."""
 
+import re
+
 from .config import FAILSAFE_HYSTERESIS
 
 DEFAULT_SETTINGS = {
@@ -15,6 +17,9 @@ DEFAULT_SETTINGS = {
     "threshold_margin": 5,     # how far below that threshold, in °C
     "dry_run": False,          # decide and log, but leave the fans to the BMC
     "smart_target": 60,        # smart mode: CPU temperature to hold, °C
+    # quiet hours: cap the manual fan speed between start and end (local time). The failsafe still
+    # hands control to the BMC whatever the hour.
+    "quiet": {"enabled": False, "start": "23:00", "end": "07:00", "max_speed": 25},
 }
 
 
@@ -74,6 +79,16 @@ def decide(settings, cpu_temp, was_failsafe=False, sensors=None):
     return "manual", max(curve_speed(settings["curve"], cpu_temp), floor), f"curve at {cpu_temp:.0f}°C", False
 
 
+def quiet_cap(quiet, now):
+    """The speed cap in force at `now` (a time.struct_time), or None outside quiet hours."""
+    if not quiet.get("enabled"):
+        return None
+    minute = now.tm_hour * 60 + now.tm_min
+    start, end = (int(x[:2]) * 60 + int(x[3:]) for x in (quiet["start"], quiet["end"]))
+    inside = start <= minute < end if start <= end else minute >= start or minute < end  # may span midnight
+    return quiet["max_speed"] if inside else None
+
+
 def ramped(window, now, target, hold):
     """Fans speed up at once but slow down only after `hold` seconds of lower demand:
     the speed applied is the highest target seen in the last `hold` seconds."""
@@ -109,6 +124,11 @@ def validate_settings(new, current):
         raise ValueError("exhaust limit must be between 30 and 90 °C, or empty to turn it off")
     if not (type(s["threshold_margin"]) in (int, float) and 0 <= s["threshold_margin"] <= 20):
         raise ValueError("threshold margin must be between 0 and 20 °C")
+    q = s["quiet"]
+    if not (isinstance(q, dict) and set(q) == {"enabled", "start", "end", "max_speed"}
+            and type(q["enabled"]) is bool and type(q["max_speed"]) is int and 0 <= q["max_speed"] <= 100
+            and all(isinstance(q[k], str) and re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", q[k]) for k in ("start", "end"))):
+        raise ValueError("quiet hours need enabled, start and end as HH:MM, and a max_speed from 0 to 100")
     if not (type(s["smart_target"]) in (int, float) and 40 <= s["smart_target"] <= 85):
         raise ValueError("smart target must be between 40 and 85 °C")
     if s["mode"] == "smart" and s["smart_target"] >= s["failsafe_temp"] - 3:

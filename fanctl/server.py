@@ -11,7 +11,7 @@ from collections import deque
 
 from .alerts import alert_config, notify
 from .config import DATA_DIR, HISTORY_SECONDS, INTERVAL, SAVE_EVERY, write_json
-from .control import DEFAULT_SETTINGS, curve_speed, decide, ramped, smart_step, speed_text
+from .control import DEFAULT_SETTINGS, curve_speed, decide, quiet_cap, ramped, smart_step, speed_text
 from .drivers import DRIVERS, HOST_RE, DemoDriver, DriverError, RedfishDriver
 
 # ---------------------------------------------------------------- one server
@@ -144,6 +144,10 @@ class Server:
                 self.window.clear()
         if speed is not None and speed > target:
             reason += f", holding {speed}% for ramp-down"
+        cap = quiet_cap(settings["quiet"], time.localtime()) if speed is not None else None
+        if cap is not None and speed > cap:
+            speed = max(cap, settings["min_speed"])
+            reason += f", quiet hours cap {speed}%"
 
         error = None
         dry = self.control and settings["dry_run"]

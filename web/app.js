@@ -310,6 +310,10 @@ function renderControls() {
   $("#margin-text").textContent = draft.threshold_margin;
   $$("#bmc-thr button").forEach(b => b.setAttribute("aria-pressed", b.dataset.thr === String(draft.bmc_thresholds)));
   $$("#dry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.dry === String(draft.dry_run)));
+  $$("#quiet-on button").forEach(b => b.setAttribute("aria-pressed", b.dataset.quiet === String(draft.quiet.enabled)));
+  $("#quiet-fields").classList.toggle("off", !draft.quiet.enabled);
+  for (const [sel, key] of [["#quiet-start", "start"], ["#quiet-end", "end"], ["#quiet-max", "max_speed"]])
+    if (document.activeElement !== $(sel)) $(sel).value = draft.quiet[key];
   $$("[data-pcie]").forEach(b => b.setAttribute("aria-pressed", b.dataset.pcie === String(draft.pcie_cooling)));
   $("#save").disabled = $("#discard").disabled = !dirty;
   $("#save-state").textContent = dirty ? "Unsaved changes" : "No changes";
@@ -327,6 +331,10 @@ $("#ramp").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) &
 $$("[data-pcie]").forEach(b => b.onclick = () => { draft.pcie_cooling = JSON.parse(b.dataset.pcie); touch(); });
 $$("[data-thr]").forEach(b => b.onclick = () => { draft.bmc_thresholds = b.dataset.thr === "true"; touch(); });
 $$("[data-dry]").forEach(b => b.onclick = () => { draft.dry_run = b.dataset.dry === "true"; touch(); });
+$$("[data-quiet]").forEach(b => b.onclick = () => { draft.quiet = { ...draft.quiet, enabled: b.dataset.quiet === "true" }; touch(); });
+$("#quiet-start").onchange = e => { if (e.target.value) { draft.quiet = { ...draft.quiet, start: e.target.value }; touch(); } };
+$("#quiet-end").onchange = e => { if (e.target.value) { draft.quiet = { ...draft.quiet, end: e.target.value }; touch(); } };
+$("#quiet-max").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) && v >= 0 && v <= 100) { draft.quiet = { ...draft.quiet, max_speed: v }; touch(); } };
 $("#min-speed").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) && v >= 0 && v <= 60) { draft.min_speed = v; touch(); } };
 $("#exhaust-limit").oninput = e => {
   const raw = e.target.value.trim(), v = +raw;
