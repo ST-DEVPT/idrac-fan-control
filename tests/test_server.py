@@ -116,3 +116,20 @@ class Stopping(unittest.TestCase):
         srv.release()                 # while the cycle is still reading
         t.join()
         self.assertEqual(srv.calls, ["auto"])  # the late cycle sent nothing after the release
+
+
+class LongHistory(unittest.TestCase):
+    def test_five_minute_buckets(self):
+        srv = Server({"id": "long", "name": "long", "driver": "demo"})
+        for i in range(61):  # 0..300 s, every 5 s
+            srv.record({"t": 1000 + i * 5, "cpu": 50 + (i % 2), "speed": 20 if i < 40 else None,
+                        "inlet": 22, "exhaust": 35, "rpm": 4000, "fanpct": None, "watts": 150})
+        self.assertEqual(len(srv.long), 1)
+        p = srv.long[0]
+        self.assertEqual((p["t"], p["cpu_max"], p["speed"], p["watts"]), (1300, 51, 20, 150))
+        self.assertAlmostEqual(p["cpu"], 50.5, delta=0.05)
+
+    def test_mostly_automatic_bucket_has_no_speed(self):
+        from fanctl.control import aggregate
+        pts = [{"t": i, "cpu": 50, "speed": None if i < 7 else 30} for i in range(10)]
+        self.assertIsNone(aggregate(pts)["speed"])

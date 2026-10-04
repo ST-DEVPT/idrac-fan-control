@@ -207,6 +207,19 @@ class Handler(BaseHTTPRequestHandler):
             if not self.authed(read_only=True):
                 return self.send(401, b"Sign in, or add ?token= with EMBED_TOKEN", "text/plain; charset=utf-8", frame=True)
             return self.file(PAGES[path], "text/html; charset=utf-8", frame=True)
+        if path == "/api/history":
+            if not self.authed(read_only=True):
+                return self.send(401, {"error": "sign in required"})
+            srv = self.server_arg()
+            if srv is None:
+                return self.send(404, {"error": "unknown server"})
+            try:
+                seconds = min(7 * 86400, max(3600, int(self.query.get("seconds", ["86400"])[0])))
+            except ValueError:
+                return self.send(400, {"error": "seconds must be a number"})
+            since = time.time() - seconds
+            with srv.lock:
+                return self.send(200, {"points": [p for p in srv.long if p["t"] >= since], "bucket": 300})
         if path == "/api/state":
             if not self.authed(read_only=True):
                 return self.send(401, {"error": "sign in required"})

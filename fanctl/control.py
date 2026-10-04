@@ -89,6 +89,21 @@ def quiet_cap(quiet, now):
     return quiet["max_speed"] if inside else None
 
 
+def aggregate(points):
+    """One long-history point from a bucket of readings: averages, the hottest CPU, and the
+    fan speed set by this controller only if it was in control for most of the bucket."""
+    def avg(key):
+        vals = [p[key] for p in points if p.get(key) is not None]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    manual = [p["speed"] for p in points if p.get("speed") is not None]
+    cpus = [p["cpu"] for p in points if p.get("cpu") is not None]
+    return {"t": points[-1]["t"], "cpu": avg("cpu"), "cpu_max": max(cpus) if cpus else None,
+            "speed": round(sum(manual) / len(manual)) if len(manual) * 2 > len(points) else None,
+            "inlet": avg("inlet"), "exhaust": avg("exhaust"), "rpm": avg("rpm"), "fanpct": avg("fanpct"),
+            "watts": avg("watts")}
+
+
 def ramped(window, now, target, hold):
     """Fans speed up at once but slow down only after `hold` seconds of lower demand:
     the speed applied is the highest target seen in the last `hold` seconds."""

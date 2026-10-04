@@ -17,7 +17,9 @@ INTERVAL = max(5, int(os.environ.get("CHECK_INTERVAL", "15")))
 DATA_DIR = Path(os.environ.get("DATA_DIR", "./data"))
 WEB = Path(__file__).parent.parent / "web"
 
-HISTORY_SECONDS = 3 * 3600
+HISTORY_SECONDS = 3 * 3600   # full-resolution history
+LONG_BUCKET = 300             # long history: one averaged point per 5 minutes...
+LONG_SECONDS = 7 * 86400      # ...kept for 7 days
 SAVE_EVERY = 300           # seconds between history snapshots to disk
 FAILSAFE_HYSTERESIS = 3    # °C the CPU must drop below the failsafe before manual control resumes
 

@@ -10,8 +10,8 @@ import time
 from collections import deque
 
 from .alerts import alert_config, notify
-from .config import DATA_DIR, HISTORY_SECONDS, INTERVAL, SAVE_EVERY, write_json
-from .control import DEFAULT_SETTINGS, curve_speed, decide, quiet_cap, ramped, smart_step, speed_text
+from .config import DATA_DIR, HISTORY_SECONDS, INTERVAL, LONG_BUCKET, LONG_SECONDS, SAVE_EVERY, write_json
+from .control import DEFAULT_SETTINGS, aggregate, curve_speed, decide, quiet_cap, ramped, smart_step, speed_text
 from .drivers import DRIVERS, HOST_RE, DemoDriver, DriverError, RedfishDriver
 
 # ---------------------------------------------------------------- one server
@@ -29,6 +29,8 @@ class Server:
         self.wake = threading.Event()
         self.stop = threading.Event()
         self.history = deque(maxlen=HISTORY_SECONDS // INTERVAL)
+        self.long = deque(maxlen=LONG_SECONDS // LONG_BUCKET)  # 5-minute averages for 7 days
+        self.bucket = []
         self.events = deque(maxlen=100)
         self.window = deque()  # (time, target) pairs for the ramp-down delay
         self.smart = {}        # smart mode controller memory
@@ -72,12 +74,13 @@ class Server:
             return False
         cutoff = time.time() - HISTORY_SECONDS
         self.history.extend(p for p in data.get("history", []) if p.get("t", 0) > cutoff)
+        self.long.extend(p for p in data.get("long", []) if p.get("t", 0) > time.time() - LONG_SECONDS)
         self.events.extend(e for e in data.get("events", []) if isinstance(e, dict))
         return bool(self.history)
 
     def save_history(self):
         with self.lock:
-            data = {"history": list(self.history), "events": list(self.events)}
+            data = {"history": list(self.history), "long": list(self.long), "events": list(self.events)}
         try:
             write_json(self.history_file, data)
         except OSError as e:
@@ -90,6 +93,15 @@ class Server:
 
     def demo_backfill(self):
         now = time.time()
+        for i in range(self.long.maxlen, HISTORY_SECONDS // LONG_BUCKET, -1):
+            t = now - i * LONG_BUCKET
+            day = 6 * abs(((t / 43200) % 2) - 1)  # warmer by day
+            cpu = DemoDriver.cpu_at(t) + day
+            speed = None if i % 97 < 3 else curve_speed(DEFAULT_SETTINGS["curve"], cpu)
+            self.long.append({"t": round(t), "cpu": round(cpu, 1), "cpu_max": round(cpu + 2, 1), "speed": speed,
+                              "inlet": round(DemoDriver.inlet_at(t) + day / 3, 1), "exhaust": round(cpu - 12, 1),
+                              "rpm": 1800 + (speed or 60) * 120, "fanpct": None,
+                              "watts": round(100 + cpu + random.uniform(-2, 2))})
         for i in range(self.history.maxlen, 0, -1):
             t = now - i * INTERVAL
             cpu = DemoDriver.cpu_at(t)
@@ -211,11 +223,20 @@ class Server:
                               updated=time.time(), power=power, dry_run=dry)
             rpms = [f["rpm"] for f in sensors["fans"] if f["rpm"] is not None]
             pcts = [f["pct"] for f in sensors["fans"] if f["pct"] is not None]
-            self.history.append({"t": round(time.time()), "cpu": cpu, "speed": speed,
+            self.record({"t": round(time.time()), "cpu": cpu, "speed": speed,
                                  "inlet": sensors["inlet"], "exhaust": sensors["exhaust"],
                                  "rpm": round(sum(rpms) / len(rpms)) if rpms else None,
                                  "fanpct": round(sum(pcts) / len(pcts)) if pcts else None,
                                  "watts": sensors["watts"]})
+
+    def record(self, point):
+        """Add a reading to the 3-hour history and, every 5 minutes, an average to the 7-day one.
+        Called with self.lock held."""
+        self.history.append(point)
+        self.bucket.append(point)
+        if point["t"] - self.bucket[0]["t"] >= LONG_BUCKET:
+            self.long.append(aggregate(self.bucket))
+            self.bucket = []
 
     def release(self):
         """Hand the fans back to the BMC: on shutdown, removal, or a change of driver."""

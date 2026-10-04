@@ -437,24 +437,40 @@ $$(".tabs button").forEach(b => b.onclick = () => {
 });
 
 let chart = null;  // geometry of the last render, for the hover tooltip
+let long = { key: "", at: 0, pts: [] };  // 5-minute averages for the 24 h and 7 d views
+
+async function loadLong() {
+  const key = server.id + ":" + range;
+  if (long.key === key && Date.now() - long.at < 300000) return;
+  const r = await api(`/api/history?server=${encodeURIComponent(server.id)}&seconds=${range}`);
+  if (!r.ok) return;
+  long = { key, at: Date.now(), pts: (await r.json()).points };
+  renderChart();
+}
+
 function renderChart() {
   if (!server) return;
+  const isLong = range > 10800;
+  if (isLong) loadLong();  // cached; re-fetched every 5 minutes
   const monitor = server.effective === "monitor" || !server.control, fanKey = monitor ? "fanpct" : "speed";
   const svg = $("#chart"), W = svg.clientWidth || 800, H = svg.clientHeight || 320;
   const pl = 36, pr = 40, pt = 10, pb = 26;
   const end = Date.now() / 1000, start = end - range;
-  const h = server.history.filter(p => p.t >= start);
+  const h = (isLong ? (long.key === server.id + ":" + range ? long.pts : []) : server.history).filter(p => p.t >= start);
   const x = t => pl + (t - start) / range * (W - pl - pr);
   const yT = v => pt + (1 - (v - T_MIN) / (T_MAX - T_MIN)) * (H - pt - pb);
   const yS = v => pt + (1 - v / 100) * (H - pt - pb);
-  const step = (server.interval || 15) * 1.5;
+  const step = isLong ? 450 : (server.interval || 15) * 1.5;
+  const label = t => range > 86400
+    ? new Date(t * 1000).toLocaleDateString([], { weekday: "short", day: "numeric" })
+    : time(t);
   let g = `<defs><pattern id="autoband" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line y2="6" stroke="var(--rule-2)"/></pattern></defs>`;
   for (let v = 0; v <= 100; v += 25) g += `<line class="grid-l" x1="${pl}" x2="${W - pr}" y1="${yS(v)}" y2="${yS(v)}"/><text x="${W - pr + 8}" y="${yS(v) + 4}">${v}%</text>`;
   for (let v = 20; v <= 95; v += 15) g += `<text x="${pl - 8}" y="${yT(v) + 4}" text-anchor="end">${v}°</text>`;
   const n = W < 520 ? 3 : 6;
   for (let i = 0; i <= n; i++) {
     const t = start + range * i / n;
-    g += `<text x="${x(t)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === n ? "end" : "middle"}">${time(t)}</text>`;
+    g += `<text x="${x(t)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === n ? "end" : "middle"}">${label(t)}</text>`;
   }
   if (!monitor) {  // stretches where the BMC had control, as hatched bands
     let band = null;
@@ -492,7 +508,7 @@ $("#chart").addEventListener("pointermove", e => {
   c1.setAttribute("cx", X); c1.setAttribute("cy", p.cpu != null ? chart.yT(p.cpu) : -10);
   c2.setAttribute("cx", X); c2.setAttribute("cy", fan != null ? chart.yS(fan) : -10);
   const tip = $("#tip");
-  tip.innerHTML = `<div class="t">${time(p.t, true)}</div>
+  tip.innerHTML = `<div class="t">${range > 86400 ? new Date(p.t * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) : time(p.t, true)}${range > 10800 ? " · 5 min average" : ""}</div>
     <div><span>CPU</span><span>${fmt(p.cpu)} °C</span></div>
     <div><span>Exhaust</span><span>${fmt(p.exhaust)} °C</span></div>
     <div><span>Fans</span><span>${fan == null ? "Automatic" : fan + " %"}</span></div>
