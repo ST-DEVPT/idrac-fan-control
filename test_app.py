@@ -256,6 +256,35 @@ assert "idrac_last_update_timestamp_seconds" in text and "e+" not in text
 st, h, _ = req("POST", "/api/logout", {}, cookie)
 assert "Max-Age=0" in h["Set-Cookie"]
 
+# ---------------------------------------------------------------- status reports
+
+assert app.sparkline([1, 2, 3, 4, 5, 6, 7, 8]) == "▁▂▃▄▅▆▇█"
+assert app.sparkline([5, 5, 5]) == "▁▁▁" and app.sparkline([]) == "" and len(app.sparkline(range(500))) == 24
+app.save_alerts(app.validate_alerts({"events": {"report": {"enabled": True}}, "report_minutes": 60,
+                                     "report_mode": "edit"}, app.alert_config()))
+rep = app.build_report(app.alert_config(), app.SERVERS)
+assert len(rep["embeds"]) == 2 and rep["embeds"][0]["title"] == "Rack A: status"
+assert any(f["name"].startswith("CPU, last") for f in rep["embeds"][0]["fields"])
+assert len(json.dumps(rep)) < 6000 and rep["allowed_mentions"] == {"parse": []}
+
+calls = []
+def fake_post(url, payload, method="POST"):
+    calls.append((method, url.rsplit("/", 2)[-1]))
+    if method == "PATCH" and len(calls) > 2:
+        raise app.urllib.error.HTTPError(url, 404, "Unknown Message", {}, None)
+    return {"id": f"m{len(calls)}"}
+app.post_webhook = fake_post
+app.send_report()
+app.send_report()                          # not due yet: nothing sent
+app.send_report(force=True)                # due: the same message is edited
+app.send_report(force=True)                # deleted in Discord: a new message is posted
+assert calls == [("POST", "abc-DEF_123"), ("PATCH", "m1"), ("PATCH", "m1"), ("POST", "abc-DEF_123")], calls
+assert json.loads(app.REPORT_STATE.read_text())["message_id"] == "m4"
+app.save_alerts(app.validate_alerts({"report_mode": "post"}, app.alert_config()))
+calls.clear()
+app.send_report(force=True)
+assert calls == [("POST", "abc-DEF_123")]
+
 app.WEB_PASSWORD = "changed"
 assert app.session_key() != key                                       # new password signs everyone out
 

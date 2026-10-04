@@ -6,12 +6,14 @@ const KIND_NAMES = {
   failsafe: "Failsafe reached", failsafe_cleared: "Failsafe cleared", hot: "Running hot",
   unreachable: "iDRAC unreachable", refused: "Fan command refused", recovered: "Back to normal",
   controller_error: "Controller error", settings_changed: "Settings changed", started: "Controller started",
+  report: "Status report",
 };
 const LEVEL_NAMES = { error: "Error", warn: "Warning", ok: "Resolved", info: "Info" };
 const SAMPLE = {
   server: "Rack A", host: "192.168.1.120", model: "PowerEdge R730", cpu: "71", speed: "45%", mode: "curve",
   reason: "curve at 71°C", error: "Unable to establish IPMI v2 / RMCP+ session", failsafe: "75",
-  interval: "15", time: "12:00:00",
+  interval: "15", time: "12:00:00", period: "1 h", cpu_min: "48", cpu_avg: "55", cpu_max: "71",
+  speed_avg: "24%", power_avg: "152", dell_pct: "0",
 };
 const fillIn = (tpl, v) => tpl.replace(/\{(\w+)\}/g, (m, k) => k in v ? String(v[k]) : m);
 
@@ -27,7 +29,7 @@ async function loadAlerts() {
 
 function body() {
   const keys = ["enabled", "username", "avatar_url", "footer", "details", "mention", "mention_levels",
-                "cooldown_minutes", "hot_threshold", "colors", "events"];
+                "cooldown_minutes", "hot_threshold", "report_minutes", "report_mode", "colors", "events"];
   const b = Object.fromEntries(keys.map(k => [k, aDraft[k]]));
   if (newWebhook !== undefined) b.webhook_url = newWebhook;
   return b;
@@ -77,7 +79,11 @@ function renderAlerts() {
   }).join("");
   setIfIdle("#al-title", d.events[aKind].title);
   setIfIdle("#al-message", d.events[aKind].message);
-  $("#al-chips").innerHTML = alerts.placeholders.map(p => `<button type="button" data-ph="${p}">{${p}}</button>`).join("");
+  $("#al-report-opts").hidden = aKind !== "report";
+  setIfIdle("#al-report-min", d.report_minutes);
+  setIfIdle("#al-report-mode", d.report_mode);
+  const phs = aKind === "report" ? [...alerts.placeholders, ...alerts.report_placeholders] : alerts.placeholders;
+  $("#al-chips").innerHTML = phs.map(p => `<button type="button" data-ph="${p}">{${p}}</button>`).join("");
 
   $("#al-save").disabled = $("#al-discard").disabled = !aDirty;
   $("#al-test").disabled = removing || !(w.set || replacing);
@@ -88,7 +94,8 @@ function renderAlerts() {
 
 function renderPreview() {
   const d = aDraft, lvl = alerts.kinds[aKind], ev = d.events[aKind];
-  const v = { ...SAMPLE, threshold: d.hot_threshold };
+  const v = { ...SAMPLE, threshold: d.hot_threshold, period: d.report_minutes % 60 ? `${d.report_minutes} min` : `${d.report_minutes / 60} h` };
+  if (aKind === "report") return renderReportPreview(d, v);
   const [mKind, mId] = d.mention.split(":");
   const mention = d.mention && d.mention_levels.includes(lvl)
     ? { here: "@here", everyone: "@everyone", role: "@role", user: "@user" }[mKind] + (mId ? ` (${mId})` : "") : "";
@@ -109,12 +116,39 @@ function renderPreview() {
   </div>`;
 }
 
+function renderReportPreview(d, v) {
+  const ev = d.events.report;
+  const avatar = /^https:\/\//.test(d.avatar_url) ? esc(d.avatar_url) : "/static/icon.svg";
+  const f = (name, value, wide) => `<div class="${wide ? "wide" : ""}"><b>${name}</b>${value}</div>`;
+  $("#al-preview").innerHTML = `<img class="dc-av" src="${avatar}" alt=""><div class="dc-body">
+    <div class="dc-head"><b>${esc(d.username)}</b><span class="dc-app">APP</span><span class="dc-time">Today at 12:00${d.report_mode === "edit" ? " (edited)" : ""}</span></div>
+    <div class="dc-embed" style="--bar:${esc(d.colors.info)}">
+      <div class="dc-title">${esc(fillIn(ev.title, v))}</div>
+      <div class="dc-desc">${esc(fillIn(ev.message, v))}</div>
+      <div class="dc-fields">
+        ${f("CPU", "<strong>50°C</strong> now<br>48–71°C · avg 55°C")}
+        ${f("Fans", "<strong>20%</strong><br>avg 24% · Dell 0% of the time")}
+        ${f("Power", "<strong>151 W</strong> now<br>avg 152 W")}
+        ${f("Air", "in 22°C · out 38°C")}
+        ${f("Status", "🟢 ok · mode curve")}
+        ${f(`CPU, last ${esc(v.period)}`, "<code>▂▂▃▄▅▇██▇▆▅▄▃▃▂▂▂▃▃▄▄▃▂▂</code> 48→71°C", true)}
+        ${f(`Fans, last ${esc(v.period)}`, "<code>▁▁▂▂▃▅▇▇▆▅▄▃▂▂▁▁▁▂▂▂▂▂▁▁</code> 15→45%", true)}
+        ${f("Recent events", "<code>11:42</code> Fans → 45% (curve at 71°C)", true)}
+      </div>
+      ${d.footer ? `<div class="dc-foot">${esc(fillIn(d.footer, v))} · Today at 12:00</div>` : ""}
+    </div>
+    ${d.enabled && ev.enabled ? "" : '<div class="dc-off">Status reports are turned off.</div>'}
+  </div>`;
+}
+
 // ---------------------------------------------------------------- inputs
 const bindText = (sel, key, map = v => v) => $(sel).addEventListener("input", e => { aDraft[key] = map(e.target.value); aTouch(); });
 bindText("#al-username", "username");
 bindText("#al-footer", "footer");
 bindText("#al-avatar", "avatar_url", v => v.trim());
 $("#al-cooldown").addEventListener("input", e => { const n = +e.target.value; if (Number.isInteger(n) && n >= 0 && n <= 1440) { aDraft.cooldown_minutes = n; aTouch(); } });
+$("#al-report-min").addEventListener("input", e => { const n = +e.target.value; if (Number.isInteger(n) && n >= 5 && n <= 1440) { aDraft.report_minutes = n; aTouch(); } });
+$("#al-report-mode").onchange = e => { aDraft.report_mode = e.target.value; aTouch(); };
 $("#al-hot").addEventListener("input", e => { const n = +e.target.value; if (n >= 30 && n <= 100) { aDraft.hot_threshold = n; aTouch(); } });
 $("#al-enabled").onchange = e => { aDraft.enabled = e.target.checked; aTouch(); };
 $("#al-details").onchange = e => { aDraft.details = e.target.checked; aTouch(); };
@@ -180,7 +214,7 @@ $("#al-discard").onclick = () => loadAlerts();
 $("#al-test").onclick = async () => {
   $("#al-test").disabled = true;
   const r = await postJSON("/api/test-alert", { kind: aKind, config: body() });
-  toast(r.ok ? `Test "${KIND_NAMES[aKind]}" sent to Discord` : "Test failed: " + (await r.json()).error, !r.ok);
+  toast(r.ok ? `Test "${KIND_NAMES[aKind]}" sent to Discord${aKind === "report" ? " with the current readings" : ""}` : "Test failed: " + (await r.json()).error, !r.ok);
   $("#al-test").disabled = false;
 };
 

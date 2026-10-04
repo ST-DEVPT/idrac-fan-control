@@ -20,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from collections import deque
 from datetime import datetime, timezone
@@ -194,11 +195,15 @@ ALERT_KINDS = {
     "controller_error": ("error", "{server}: controller error",    "{error}\nFans handed back to the iDRAC."),
     "settings_changed": ("info",  "{server}: settings changed",    "Mode {mode}, failsafe {failsafe}°C."),
     "started":          ("info",  "{server}: controller started",  "Watching {host} every {interval} s."),
+    "report":           ("info",  "{server}: status",              "{model} · last {period}"),
 }
+REPORT_PLACEHOLDERS = ("period", "cpu_min", "cpu_avg", "cpu_max", "speed_avg", "power_avg", "dell_pct")
 PLACEHOLDERS = ("server", "host", "model", "cpu", "speed", "mode", "reason", "error", "failsafe", "threshold", "interval", "time")
 SAMPLE = {"server": "Rack A", "host": "192.168.1.120", "model": "PowerEdge R730", "cpu": "71", "speed": "45%",
           "mode": "curve", "reason": "curve at 71°C", "error": "Unable to establish IPMI v2 / RMCP+ session",
-          "failsafe": "75", "threshold": "68", "interval": "15", "time": "12:00:00"}
+          "failsafe": "75", "threshold": "68", "interval": "15", "time": "12:00:00",
+          "period": "1 h", "cpu_min": "48", "cpu_avg": "55", "cpu_max": "71", "speed_avg": "24%",
+          "power_avg": "152", "dell_pct": "0"}
 
 ALERT_DEFAULTS = {
     "enabled": True,
@@ -211,8 +216,10 @@ ALERT_DEFAULTS = {
     "mention_levels": ["error"],
     "cooldown_minutes": 0,   # minimum gap between two alerts of the same kind for the same server
     "hot_threshold": 68,
+    "report_minutes": 60,    # status report period
+    "report_mode": "edit",   # "edit": keep one message up to date; "post": a new message each time
     "colors": {"error": "#c0301c", "warn": "#e4501b", "ok": "#3b7a39", "info": "#4f4d48"},
-    "events": {k: {"enabled": k not in ("hot", "settings_changed", "started"), "title": t, "message": m}
+    "events": {k: {"enabled": k not in ("hot", "settings_changed", "started", "report"), "title": t, "message": m}
                for k, (_, t, m) in ALERT_KINDS.items()},
 }
 alert_lock = threading.Lock()
@@ -243,6 +250,7 @@ def public_alert_config(cfg):
             "webhook": {"set": bool(shown), "source": "dashboard" if own else "environment" if env else None,
                         "hint": "…" + shown[-4:] if shown else ""},
             "kinds": {k: lvl for k, (lvl, _, _) in ALERT_KINDS.items()}, "placeholders": PLACEHOLDERS,
+            "report_placeholders": REPORT_PLACEHOLDERS,
             "defaults": {k: {"title": t, "message": m} for k, (_, t, m) in ALERT_KINDS.items()}}
 
 
@@ -288,6 +296,15 @@ def validate_alerts(new, current):
         if not (type(v) is int and 0 <= v <= 1440):
             raise ValueError("cooldown must be a whole number of minutes from 0 to 1440")
         cfg["cooldown_minutes"] = v
+    if "report_minutes" in new:
+        v = new["report_minutes"]
+        if not (type(v) is int and 5 <= v <= 1440):
+            raise ValueError("report period must be a whole number of minutes from 5 to 1440")
+        cfg["report_minutes"] = v
+    if "report_mode" in new:
+        if new["report_mode"] not in ("edit", "post"):
+            raise ValueError("report mode must be edit or post")
+        cfg["report_mode"] = new["report_mode"]
     if "hot_threshold" in new:
         v = new["hot_threshold"]
         if not (type(v) in (int, float) and 30 <= v <= 100):
@@ -352,19 +369,142 @@ def build_payload(cfg, kind, values):
     return payload
 
 
-def post_webhook(url, payload):
-    req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
-                                 headers={"Content-Type": "application/json",
-                                          "User-Agent": f"idrac-fan-control/{VERSION}"})
+def post_webhook(url, payload, method="POST"):
+    """Send to Discord and return the message it created or edited (wait=true)."""
+    req = urllib.request.Request(url + ("&" if "?" in url else "?") + "wait=true", data=json.dumps(payload).encode(),
+                                 method=method, headers={"Content-Type": "application/json",
+                                                         "User-Agent": f"idrac-fan-control/{VERSION}"})
     with urllib.request.urlopen(req, timeout=10) as r:
-        return r.status
+        return json.loads(r.read() or b"{}")
+
+
+# ---------------------------------------------------------------- status reports
+
+SPARK = "▁▂▃▄▅▆▇█"
+REPORT_STATE = DATA_DIR / "report-state.json"
+
+
+def sparkline(values, width=24):
+    """Unicode bar chart of `values` squeezed into `width` buckets (bucket averages)."""
+    values = [v for v in values if v is not None]
+    if not values:
+        return ""
+    n = min(width, len(values))
+    buckets = [values[i * len(values) // n:(i + 1) * len(values) // n] for i in range(n)]
+    avgs = [sum(b) / len(b) for b in buckets]
+    lo, hi = min(avgs), max(avgs)
+    return "".join(SPARK[0 if hi == lo else round((a - lo) / (hi - lo) * (len(SPARK) - 1))] for a in avgs)
+
+
+def period_text(minutes):
+    return f"{minutes // 60} h" if minutes % 60 == 0 else f"{minutes} min"
+
+
+def report_values(server, minutes):
+    """Summary of the last `minutes` of history, as template placeholders plus the raw series."""
+    with server.lock:
+        pts = [p for p in server.history if p["t"] > time.time() - minutes * 60]
+        st, events = dict(server.state), [e for e in server.events if e["t"] > time.time() - minutes * 60]
+    cpu = [p["cpu"] for p in pts if p.get("cpu") is not None]
+    speed = [p["speed"] for p in pts if p.get("speed") is not None]
+    watts = [p["watts"] for p in pts if p.get("watts") is not None]
+    sens = st["sensors"] or {}
+    avg = lambda xs: sum(xs) / len(xs) if xs else None
+    num = lambda v, unit="": "—" if v is None else f"{v:.0f}{unit}"
+    values = {
+        "server": server.name, "host": server.host, "model": st["model"] or "Dell server",
+        "cpu": num(st["cpu_temp"]), "mode": server.settings()["mode"], "reason": st["reason"],
+        "speed": "Dell automatic" if st["effective"] == "dell" else num(st["applied_speed"], "%"),
+        "error": st["error"] or "", "failsafe": server.settings()["failsafe_temp"], "interval": INTERVAL,
+        "time": time.strftime("%H:%M:%S"), "period": period_text(minutes),
+        "cpu_min": num(min(cpu) if cpu else None), "cpu_avg": num(avg(cpu)), "cpu_max": num(max(cpu) if cpu else None),
+        "speed_avg": num(avg(speed), "%"), "power_avg": num(avg(watts)),
+        "dell_pct": num(100 * sum(p.get("speed") is None for p in pts) / len(pts) if pts else None),
+        "watts": num(sens.get("watts")), "inlet": num(sens.get("inlet")), "exhaust": num(sens.get("exhaust")),
+    }
+    return values, {"cpu": cpu, "speed": speed, "watts": watts}, events
+
+
+def build_report(cfg, servers):
+    ev = cfg["events"]["report"]
+    embeds = []
+    for server in list(servers.values())[:10]:  # Discord allows 10 embeds per message
+        v, series, events = report_values(server, cfg["report_minutes"])
+        state = "🔴 iDRAC error" if v["error"] else "🟠 failsafe" if server.state["failsafe"] else "🟢 ok"
+        fields = [
+            {"name": "CPU", "value": f"**{v['cpu']}°C** now\n{v['cpu_min']}–{v['cpu_max']}°C · avg {v['cpu_avg']}°C", "inline": True},
+            {"name": "Fans", "value": f"**{v['speed']}**\navg {v['speed_avg']} · Dell {v['dell_pct']}% of the time", "inline": True},
+            {"name": "Power", "value": f"**{v['watts']} W** now\navg {v['power_avg']} W", "inline": True},
+            {"name": "Air", "value": f"in {v['inlet']}°C · out {v['exhaust']}°C", "inline": True},
+            {"name": "Status", "value": f"{state} · mode {v['mode']}", "inline": True},
+        ]
+        if series["cpu"]:
+            fields.append({"name": f"CPU, last {v['period']}",
+                           "value": f"`{sparkline(series['cpu'])}` {v['cpu_min']}→{v['cpu_max']}°C", "inline": False})
+        if series["speed"]:
+            fields.append({"name": f"Fans, last {v['period']}",
+                           "value": f"`{sparkline(series['speed'])}` {min(series['speed'])}→{max(series['speed'])}%", "inline": False})
+        if events:
+            lines = [f"`{time.strftime('%H:%M', time.localtime(e['t']))}` {e['msg']}"[:150] for e in events[:5]]
+            fields.append({"name": "Recent events", "value": "\n".join(lines)[:1024], "inline": False})
+        embed = {"title": fill(ev["title"], v)[:256], "description": fill(ev["message"], v)[:4000],
+                 "color": int(cfg["colors"]["error" if v["error"] else "warn" if server.state["failsafe"] else "info"][1:], 16),
+                 "fields": fields, "timestamp": datetime.now(timezone.utc).isoformat()}
+        if cfg["footer"]:
+            embed["footer"] = {"text": fill(cfg["footer"], v)[:2048]}
+        embeds.append(embed)
+    payload = {"username": cfg["username"], "embeds": embeds, "allowed_mentions": {"parse": []}}
+    if cfg["avatar_url"]:
+        payload["avatar_url"] = cfg["avatar_url"]
+    return payload
+
+
+def send_report(force=False):
+    """Post the status report when it is due. In "edit" mode the same message is updated in
+    place, so the channel holds one live status card instead of a stream of them."""
+    cfg = alert_config()
+    url = webhook_of(cfg)
+    if not (url and cfg["enabled"] and cfg["events"]["report"]["enabled"]):
+        return
+    try:
+        st = json.loads(REPORT_STATE.read_text())
+    except (OSError, ValueError):
+        st = {}
+    if not force and time.time() - st.get("last", 0) < cfg["report_minutes"] * 60:
+        return
+    payload = build_report(cfg, SERVERS)
+    hook = hashlib.sha256(url.encode()).hexdigest()[:16]  # a new webhook starts a new message
+    msg_id = st.get("message_id") if cfg["report_mode"] == "edit" and st.get("hook") == hook else None
+    try:
+        if msg_id:
+            try:
+                post_webhook(f"{url}/messages/{msg_id}", payload, "PATCH")
+            except urllib.error.HTTPError as e:
+                if e.code != 404:  # message deleted in Discord: post a fresh one
+                    raise
+                msg_id = None
+        if not msg_id:
+            msg_id = post_webhook(url, payload).get("id")
+    except Exception as e:
+        print("Discord status report failed:", e, flush=True)
+        return
+    write_json(REPORT_STATE, {"last": time.time(), "message_id": msg_id, "hook": hook})
+
+
+def reporter():
+    while True:
+        time.sleep(30)
+        try:
+            send_report()
+        except Exception as e:  # a reporting bug must never stop the reports for good
+            print("status report error:", repr(e), flush=True)
 
 
 def notify(server, kind, **values):
     """Send one alert in the background, so a slow Discord never delays the fans."""
     cfg = alert_config()
     url = webhook_of(cfg)
-    if not (url and cfg["enabled"] and cfg["events"][kind]["enabled"]):
+    if kind == "report" or not (url and cfg["enabled"] and cfg["events"][kind]["enabled"]):
         return
     key, now = (server.id, kind), time.time()
     with alert_lock:
@@ -946,7 +1086,8 @@ class Handler(BaseHTTPRequestHandler):
             url = webhook_of(cfg)
             if kind not in ALERT_KINDS or not url:
                 return self.send(400, {"error": "unknown alert" if url else "no Discord webhook configured"})
-            payload = build_payload(cfg, kind, SAMPLE)
+            # the status report is tested with the real readings, everything else with sample values
+            payload = build_report(cfg, SERVERS) if kind == "report" else build_payload(cfg, kind, SAMPLE)
             payload["embeds"][0]["title"] = "[test] " + payload["embeds"][0]["title"][:249]
             try:
                 post_webhook(url, payload)
@@ -1005,6 +1146,7 @@ def serve():
         print("WARNING: WEB_PASSWORD is not set; the dashboard is open to anyone who can reach it", flush=True)
     for srv in SERVERS.values():
         threading.Thread(target=srv.run, daemon=True, name=srv.id).start()
+    threading.Thread(target=reporter, daemon=True, name="reporter").start()
     print(f"iDRAC Fan Control {VERSION} listening on :{PORT} for {len(SERVERS)} server(s)", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 

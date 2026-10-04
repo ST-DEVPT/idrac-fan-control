@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.0]
+
+- Discord status reports: temperatures, fan speed, power, min/avg/max, time in Dell mode, trend lines
+  and recent events for every server, on a schedule. By default one message is edited in place.
+
 ## [1.1.0]
 
 - Several servers in one dashboard (`IDRAC_1_HOST`, `IDRAC_2_HOST`, ...), with tabs.

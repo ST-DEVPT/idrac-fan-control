@@ -33,7 +33,14 @@ the iDRAC, so a homelab server can run quietly without cooking itself.
 mentions (@here, @everyone, a role or a user, only for the levels you pick), a cooldown, a "running hot"
 threshold, and which of nine events to send, each with its own title and message using placeholders such as
 `{server}`, `{cpu}`, `{speed}` and `{error}`. A live preview shows the message, and "Send test" posts it
-before you save. The webhook is stored in `/data/alerts.json` (mode 600) and never sent back to the browser.
+before you save.
+
+**Status reports** post a summary to the same channel every few minutes or hours: current CPU, fans,
+power and air temperatures, min/avg/max over the period, time spent in Dell mode, Unicode trend lines
+for CPU and fan speed, and the latest events. One message is kept up to date by default, so the channel
+shows a live status card instead of filling up; a new message each time is an option.
+
+The webhook is stored in `/data/alerts.json` (mode 600) and never sent back to the browser.
 
 **Homarr:** add an *iFrame* widget with the `/embed` URL above, and an app tile pointing at the dashboard
 with its status check on `/healthz`.

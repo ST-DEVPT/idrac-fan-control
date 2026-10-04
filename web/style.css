@@ -352,3 +352,6 @@ body.embed.solid { background: var(--bg); }
   .al-col:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
   .colors { grid-template-columns: 1fr 1fr; }
 }
+.dc-fields .wide { grid-column: 1 / -1; }
+.dc-fields strong { color: #f2f3f5; font-weight: 600; }
+.dc-fields code { font: 12px/1 var(--mono); background: #1e1f22; padding: 2px 4px; border-radius: 3px; letter-spacing: -1px; }

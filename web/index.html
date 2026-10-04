@@ -164,6 +164,11 @@
         <h3>Events</h3>
         <ul class="events" id="al-events"></ul>
         <div class="editor">
+          <div class="fld two" id="al-report-opts" hidden>
+            <div><label for="al-report-min">Send every</label><div class="unit"><input type="number" id="al-report-min" min="5" max="1440"><span>min</span></div></div>
+            <div><label for="al-report-mode">In Discord</label>
+              <select id="al-report-mode"><option value="edit">Keep one message updated</option><option value="post">Post a new message each time</option></select></div>
+          </div>
           <div class="fld"><label for="al-title">Title</label><input id="al-title" maxlength="256"></div>
           <div class="fld"><label for="al-message">Message</label><textarea id="al-message" rows="4" maxlength="2000"></textarea></div>
           <div class="chips" id="al-chips" aria-label="Insert a placeholder"></div>
