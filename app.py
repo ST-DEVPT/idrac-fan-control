@@ -246,7 +246,7 @@ def valid_token(key, token):
 
 lock = threading.Lock()
 wake = threading.Event()
-history = deque(maxlen=720)  # 3 h at the default 15 s interval
+history = deque(maxlen=3 * 3600 // INTERVAL)  # always 3 h, whatever the interval
 events = deque(maxlen=50)
 state = {"sensors": None, "cpu_temp": None, "effective": None, "applied_speed": None,
          "reason": "", "failsafe": False, "error": None, "updated": None, "power": None,
