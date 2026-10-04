@@ -313,10 +313,14 @@ class SupermicroDriver(IPMIDriver):
 
 # ---------------------------------------------------------------- Redfish
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    """A redirect would carry the Basic auth header to wherever the BMC points: refuse it."""
-    def redirect_request(self, *args, **kwargs):
-        return None
+class SameOriginRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect carries the Basic auth header along. Follow it only within the same BMC (iLO 4
+    sends /redfish/v1/Chassis to /redfish/v1/Chassis/ with a 308); refuse anything else."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        old, new = urllib.parse.urlsplit(req.full_url), urllib.parse.urlsplit(newurl)
+        if (new.scheme, new.netloc) != (old.scheme, old.netloc):
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class RedfishDriver(Driver):
@@ -341,7 +345,7 @@ class RedfishDriver(Driver):
         host = f"[{self.host}]" if self.host.count(":") > 1 and not self.host.startswith("[") else self.host
         req = urllib.request.Request(f"https://{host}{path}", headers={
             "Authorization": f"Basic {token}", "Accept": "application/json", "OData-Version": "4.0"})
-        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx), NoRedirect)
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx), SameOriginRedirect)
         try:
             with opener.open(req, timeout=self.timeout) as r:
                 return json.loads(r.read(5_000_000))

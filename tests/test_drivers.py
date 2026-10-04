@@ -189,8 +189,16 @@ class Redirects(unittest.TestCase):
 
         class Redirect(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
-                self.send_response(302)
-                self.send_header("Location", "http://127.0.0.1:1/steal")
+                if self.path == "/redfish/v1/Chassis/":
+                    body = self.headers.get("Authorization", "").encode()
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                self.send_response(308 if self.path == "/redfish/v1/Chassis" else 302)
+                self.send_header("Location", "/redfish/v1/Chassis/" if self.path == "/redfish/v1/Chassis"
+                                 else "http://127.0.0.1:1/steal")
                 self.end_headers()
 
             def log_message(self, *a):
@@ -198,10 +206,14 @@ class Redirects(unittest.TestCase):
 
         srv = http.server.HTTPServer(("127.0.0.1", 0), Redirect)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-        opener = urllib.request.build_opener(drivers.NoRedirect)
-        with self.assertRaises(urllib.error.HTTPError) as cm:
-            opener.open(f"http://127.0.0.1:{srv.server_address[1]}/redfish/v1", timeout=5)
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        opener = urllib.request.build_opener(drivers.SameOriginRedirect)
+        with self.assertRaises(urllib.error.HTTPError) as cm:  # another host: refused
+            opener.open(f"{base}/redfish/v1", timeout=5)
         cm.exception.close()
+        req = urllib.request.Request(f"{base}/redfish/v1/Chassis", headers={"Authorization": "Basic x"})
+        with opener.open(req, timeout=5) as r:  # same BMC, trailing slash: followed, auth kept
+            self.assertEqual(r.read(), b"Basic x")
         srv.shutdown()
         srv.server_close()
 

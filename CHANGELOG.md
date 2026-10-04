@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.0.1]
+
+- Redfish: follow redirects that stay on the same BMC. HPE iLO 4 answers `/redfish/v1/Chassis` with a
+  308 to the trailing-slash path, which showed as "HTTP 308 Moved Permanently". Redirects to any other
+  host are still refused, so the password never leaves the BMC.
+
 ## [2.0.0]
 
 - Supports more than Dell: Supermicro (fan control, experimental), HPE iLO 4 with unlocked firmware
