@@ -1,0 +1,18 @@
+services:
+  idrac-fan-control:
+    image: ghcr.io/st-devpt/idrac-fan-control:latest
+    container_name: idrac-fan-control
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      IDRAC_HOST: 192.168.1.120     # iDRAC IP or hostname, "local", or "demo"
+      IDRAC_USERNAME: root
+      IDRAC_PASSWORD: calvin
+      WEB_PASSWORD: change-me       # dashboard password; leave empty to disable sign-in
+      CHECK_INTERVAL: 15            # seconds between readings
+    # For IDRAC_HOST: local (container running on the server itself):
+    # devices:
+    #   - /dev/ipmi0:/dev/ipmi0

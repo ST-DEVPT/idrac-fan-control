@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · iDRAC Fan Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23161616'/%3E%3Crect x='3' y='9' width='2' height='4' fill='%23e4501b'/%3E%3Crect x='7' y='6' width='2' height='7' fill='%23fff'/%3E%3Crect x='11' y='3' width='2' height='10' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f2f0eb; --surface: #faf9f6; --ink: #171717; --ink-2: #4f4d48; --ink-3: #8a877f;
+  --rule: #dedad1; --rule-2: #c7c2b6; --accent: #e4501b; --bad: #c0301c;
+  --sans: "Archivo", "Helvetica Neue", Helvetica, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111110; --surface: #171716; --ink: #ebe9e4; --ink-2: #aaa79f; --ink-3: #6f6c65;
+    --rule: #272624; --rule-2: #3a3834; --accent: #ff6a33; --bad: #ff5a43;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans);
+  -webkit-font-smoothing: antialiased; display: grid; grid-template-rows: 1fr auto;
+}
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+main { display: grid; place-items: center; padding: 40px 16px; }
+.box { width: 100%; max-width: 360px; }
+.mark { display: flex; align-items: center; gap: 10px; margin-bottom: 40px; }
+.mark svg { width: 28px; height: 28px; }
+.mark span { font-weight: 650; font-size: 15px; }
+h1 { margin: 0 0 6px; font-size: 34px; font-weight: 450; font-stretch: 78%; letter-spacing: -.01em; line-height: 1.05; }
+p { margin: 0 0 28px; color: var(--ink-3); }
+label { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
+input[type=password] {
+  width: 100%; padding: 11px 12px; border: 1px solid var(--rule-2); border-radius: 7px;
+  background: var(--surface); color: var(--ink); font: 15px var(--mono);
+}
+input[type=password]:focus { border-color: var(--ink); outline: none; }
+.row { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 22px; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); margin: 0; cursor: pointer; }
+.check input { accent-color: var(--ink); width: 15px; height: 15px; margin: 0; }
+button {
+  width: 100%; padding: 11px; border: 1px solid var(--ink); border-radius: 7px;
+  background: var(--ink); color: var(--bg); font: 600 14px var(--sans); cursor: pointer;
+}
+button:disabled { opacity: .5; cursor: default; }
+.error { min-height: 20px; margin-top: 12px; font-size: 13px; color: var(--bad); }
+footer { padding: 18px 16px; border-top: 1px solid var(--rule); font-size: 12px; color: var(--ink-3); text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <form class="box" id="form">
+    <div class="mark">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect width="16" height="16" rx="3" fill="currentColor"/><rect x="3" y="9" width="2" height="4" fill="var(--accent)"/><rect x="7" y="6" width="2" height="7" fill="var(--bg)"/><rect x="11" y="3" width="2" height="10" fill="var(--bg)"/></svg>
+      <span>iDRAC Fan Control</span>
+    </div>
+    <h1>Sign in</h1>
+    <p>This dashboard controls the server's fans.</p>
+    <label for="password">Password</label>
+    <input type="password" id="password" autocomplete="current-password" required autofocus>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="remember"> Keep me signed in for 30 days</label>
+    </div>
+    <button id="submit">Sign in</button>
+    <div class="error" id="error" role="alert"></div>
+  </form>
+</main>
+<footer>Set the password with the <code>WEB_PASSWORD</code> environment variable.</footer>
+<script>
+const form = document.getElementById("form"), btn = document.getElementById("submit"), err = document.getElementById("error");
+form.onsubmit = async e => {
+  e.preventDefault();
+  btn.disabled = true; btn.textContent = "Signing in…"; err.textContent = "";
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: form.password.value, remember: form.remember.checked }),
+    });
+    if (r.ok) return location.replace("/");
+    err.textContent = (await r.json()).error || "Sign-in failed";
+    form.password.select();
+  } catch {
+    err.textContent = "Cannot reach the dashboard";
+  }
+  btn.disabled = false; btn.textContent = "Sign in";
+};
+</script>
+</body>
+</html>
