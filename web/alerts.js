@@ -4,7 +4,7 @@ let newWebhook;  // undefined: keep the stored one; "": remove it; otherwise the
 
 const KIND_NAMES = {
   failsafe: "Failsafe reached", failsafe_cleared: "Failsafe cleared", hot: "Running hot",
-  unreachable: "iDRAC unreachable", refused: "Fan command refused", recovered: "Back to normal",
+  unreachable: "BMC unreachable", refused: "Fan command refused", recovered: "Back to normal",
   controller_error: "Controller error", settings_changed: "Settings changed", started: "Controller started",
   report: "Status report",
 };
@@ -127,7 +127,7 @@ function renderReportPreview(d, v) {
       <div class="dc-desc">${esc(fillIn(ev.message, v))}</div>
       <div class="dc-fields">
         ${f("CPU", "<strong>50°C</strong> now<br>48–71°C · avg 55°C")}
-        ${f("Fans", "<strong>20%</strong><br>avg 24% · Dell 0% of the time")}
+        ${f("Fans", "<strong>20%</strong><br>avg 24% · automatic 0% of the time")}
         ${f("Power", "<strong>151 W</strong> now<br>avg 152 W")}
         ${f("Air", "in 22°C · out 38°C")}
         ${f("Status", "🟢 ok · mode curve")}

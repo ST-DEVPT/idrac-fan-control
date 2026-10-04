@@ -20,14 +20,16 @@ async function poll() {
 }
 
 function render(s) {
-  const sens = s.sensors || { fans: [] }, dell = s.effective === "dell";
-  const rpms = sens.fans.map(f => f.rpm);
+  const sens = s.sensors || { fans: [] }, auto = s.effective === "auto", monitor = s.effective === "monitor";
+  const pcts = sens.fans.map(f => f.pct).filter(v => v != null);
+  const rpms = sens.fans.map(f => f.rpm).filter(v => v != null);
   $("name").textContent = s.name;
   $("dot").className = "dot " + (s.error ? "bad" : s.failsafe ? "warn" : "ok");
-  $("mode").textContent = s.error ? "iDRAC error" : s.failsafe ? "Failsafe" : dell ? "Dell automatic" : s.settings.mode === "fixed" ? "Fixed" : "Curve";
+  $("mode").textContent = s.error ? "BMC error" : s.failsafe ? "Failsafe" : monitor ? "Monitoring" : auto ? "Automatic" : s.settings.mode === "fixed" ? "Fixed" : "Curve";
   $("cpu").innerHTML = s.cpu_temp == null ? "—" : `${fmt(s.cpu_temp)}<small>°C</small>`;
   $("cpu").classList.toggle("hot", s.cpu_temp != null && s.cpu_temp >= s.settings.failsafe_temp - 5);
-  $("fans").innerHTML = dell ? "Auto" : `${fmt(s.applied_speed)}<small>%</small>`;
+  $("fans").innerHTML = monitor ? (pcts.length ? `${fmt(pcts.reduce((a, b) => a + b) / pcts.length)}<small>%</small>` : "—")
+    : auto ? "Auto" : `${fmt(s.applied_speed)}<small>%</small>`;
   $("watts").innerHTML = sens.watts == null ? "—" : `${fmt(sens.watts)}<small>W</small>`;
   $("inlet").textContent = sens.inlet == null ? "—" : `${fmt(sens.inlet)} °C`;
   $("exhaust").textContent = sens.exhaust == null ? "—" : `${fmt(sens.exhaust)} °C`;
@@ -43,7 +45,7 @@ function render(s) {
   const lo = Math.min(...temps, 30) - 2, hi = Math.max(...temps, lo + 12) + 2;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.innerHTML = `<line x1="0" x2="${W}" y1="${H - 1}" y2="${H - 1}" stroke="var(--rule)"/>
-    <path d="${line("speed", 0, 100)}" fill="none" stroke="var(--accent)" stroke-width="1.25" opacity=".8"/>
+    <path d="${line(monitor ? "fanpct" : "speed", 0, 100)}" fill="none" stroke="var(--accent)" stroke-width="1.25" opacity=".8"/>
     <path d="${line("cpu", lo, hi)}" fill="none" stroke="var(--cool)" stroke-width="1.5"/>`;
 }
 

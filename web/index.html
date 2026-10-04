@@ -3,34 +3,73 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>iDRAC Fan Control</title>
+<title>Fan Control</title>
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="app">
 
-<header class="top">
-  <div class="wrap">
-    <div class="id">
-      <h1 id="model">Server</h1>
-      <span id="host">—</span>
+<aside class="side" id="side">
+  <a class="brand" href="#/"><img src="/static/icon.svg" alt=""><span>Fan Control</span></a>
+  <nav class="side-nav" aria-label="Main">
+    <a href="#/" data-route="overview">Overview</a>
+    <a href="#/alerts" data-route="alerts">Discord</a>
+  </nav>
+  <div class="side-label"><span>Integrations</span></div>
+  <nav class="side-nav" aria-label="Integrations">
+    <a href="#/prometheus" data-route="prometheus">Prometheus</a>
+    <a href="#/grafana" data-route="grafana">Grafana</a>
+    <a href="#/homarr" data-route="homarr">Homarr</a>
+  </nav>
+  <div class="side-label"><span>Servers</span><a href="#/add" class="side-add" title="Add a server" aria-label="Add a server">+</a></div>
+  <nav class="side-servers" id="side-servers" aria-label="Servers"></nav>
+  <div class="side-foot">
+    <span id="version"></span>
+    <button class="linkish" id="signout" hidden>Sign out</button>
+  </div>
+</aside>
+
+<div class="main">
+
+<!-- ======================================================== overview -->
+<section class="view" id="v-overview" hidden>
+  <header class="page-head">
+    <div>
+      <h1>Overview</h1>
+      <p class="lede" id="ov-lede">Loading…</p>
     </div>
-    <div class="meta">
+    <a class="btn primary" href="#/add">Add server</a>
+  </header>
+  <div class="fleet" id="fleet"></div>
+  <div class="welcome" id="welcome" hidden>
+    <h2>Add your first server</h2>
+    <p>Pick the hardware you have. Dell iDRAC and Supermicro get full fan control; HPE iLO and other
+      Redfish or IPMI servers are monitored, with history, alerts and Grafana.</p>
+    <div class="tiles" id="welcome-tiles"></div>
+  </div>
+</section>
+
+<!-- ======================================================== one server -->
+<section class="view" id="v-server" hidden>
+  <header class="page-head">
+    <div>
+      <div class="crumbs"><a href="#/">Overview</a> / <span id="s-vendor"></span></div>
+      <h1 id="s-name">Server</h1>
+      <p class="lede"><span id="s-model"></span><span class="sep">·</span><span id="host"></span></p>
+    </div>
+    <div class="head-meta">
       <span><span class="dot" id="dot-power"></span><span id="power">—</span></span>
       <span><span class="dot" id="dot-link"></span><span id="link">Connecting…</span></span>
       <span>Mode <b id="mode-now">—</b></span>
-      <button class="signout" id="signout" hidden>Sign out</button>
+      <a class="btn" id="s-edit" href="#/">Edit</a>
     </div>
-  </div>
-</header>
-<nav class="servers" id="servers" hidden aria-label="Servers"><div class="wrap" id="server-tabs"></div></nav>
-<div class="alert" id="alert" role="alert"><div class="wrap"><b id="alert-title"></b><span id="alert-msg"></span></div></div>
+  </header>
+  <div class="alert" id="alert" role="alert"><b id="alert-title"></b><span id="alert-msg"></span></div>
 
-<main class="wrap">
   <div class="readouts">
     <div class="ro"><div class="lbl">CPU <em id="cpu-name"></em></div><div class="v" id="v-cpu">—</div><div class="sub" id="s-cpu"></div><svg class="spark" id="sp-cpu"></svg></div>
     <div class="ro"><div class="lbl">Fans</div><div class="v" id="v-speed">—</div><div class="sub" id="s-speed"></div><svg class="spark" id="sp-speed"></svg></div>
-    <div class="ro"><div class="lbl">Average speed</div><div class="v" id="v-rpm">—</div><div class="sub" id="s-rpm"></div><svg class="spark" id="sp-rpm"></svg></div>
+    <div class="ro"><div class="lbl" id="lbl-fanavg">Average speed</div><div class="v" id="v-rpm">—</div><div class="sub" id="s-rpm"></div><svg class="spark" id="sp-rpm"></svg></div>
     <div class="ro"><div class="lbl">Inlet air</div><div class="v" id="v-inlet">—</div><div class="sub">ambient temperature</div><svg class="spark" id="sp-inlet"></svg></div>
     <div class="ro"><div class="lbl">Exhaust air</div><div class="v" id="v-exhaust">—</div><div class="sub" id="s-exhaust"></div><svg class="spark" id="sp-exhaust"></svg></div>
     <div class="ro"><div class="lbl">Power draw</div><div class="v" id="v-watts">—</div><div class="sub" id="s-watts"></div><svg class="spark" id="sp-watts"></svg></div>
@@ -44,7 +83,7 @@
           <span><i style="--c:var(--cool)"></i>CPU °C</span>
           <span><i class="dash" style="--c:var(--ink-3)"></i>Exhaust °C</span>
           <span><i style="--c:var(--accent)"></i>Fans %</span>
-          <span><i class="box"></i>Dell control</span>
+          <span id="legend-auto"><i class="box"></i>Automatic</span>
         </div>
         <div class="aside tabs" role="group" aria-label="Time range">
           <button data-range="900">15 min</button><button data-range="3600" aria-pressed="true">1 h</button><button data-range="10800">3 h</button>
@@ -58,12 +97,14 @@
 
     <section>
       <div class="hd"><h2>Control</h2><span class="aside" id="applied"></span></div>
+      <div class="monitor-note" id="monitor-note" hidden></div>
+      <div id="control-body">
       <div class="seg" role="group" aria-label="Mode">
-        <button data-mode="dell">Dell</button><button data-mode="fixed">Fixed</button><button data-mode="curve">Curve</button>
+        <button data-mode="auto">Automatic</button><button data-mode="fixed">Fixed</button><button data-mode="curve">Curve</button>
       </div>
 
-      <div class="panel" data-panel="dell">
-        <p class="help">The iDRAC sets fan speed with its factory profile. Louder, but no surprises. This is also where the controller falls back whenever something goes wrong.</p>
+      <div class="panel" data-panel="auto">
+        <p class="help">The BMC sets fan speed with its factory profile. Louder, but no surprises. This is also where the controller falls back whenever something goes wrong.</p>
       </div>
       <div class="panel" data-panel="fixed">
         <p class="help">Every fan at the same speed, as long as the CPU stays below the failsafe temperature.</p>
@@ -85,14 +126,14 @@
 
       <div class="fields">
         <div class="f">
-          <label for="failsafe">Failsafe temperature<small>At or above this, the iDRAC takes back control</small></label>
+          <label for="failsafe">Failsafe temperature<small>At or above this, the BMC takes back control</small></label>
           <div class="num"><input type="number" id="failsafe" min="40" max="100" step="1"><span class="muted">°C</span></div>
         </div>
         <div class="f">
           <label for="ramp">Ramp-down delay<small>Fans speed up at once, slow down after this long</small></label>
           <div class="num"><input type="number" id="ramp" min="0" max="600" step="5"><span class="muted">s</span></div>
         </div>
-        <div class="f">
+        <div class="f" id="pcie-row">
           <label>Third-party PCIe cards<small>Dell's default cooling response</small></label>
           <div class="mini" role="group" aria-label="Third-party PCIe cards">
             <button data-pcie="null">Leave</button><button data-pcie="true">On</button><button data-pcie="false">Off</button>
@@ -105,9 +146,195 @@
         <button class="btn" id="discard" disabled>Discard</button>
         <button class="btn primary" id="save" disabled>Apply</button>
       </div>
+      </div>
     </section>
   </div>
 
+
+  <div class="grid3">
+    <section>
+      <div class="hd"><h2>Fans</h2><span class="aside" id="fan-count"></span></div>
+      <table><thead><tr><th>Sensor</th><th></th><th class="r" id="fan-unit">RPM</th></tr></thead><tbody id="fans"></tbody></table>
+    </section>
+    <section>
+      <div class="hd"><h2>Temperatures</h2><span class="aside" id="temp-count"></span></div>
+      <table><thead><tr><th>Sensor</th><th></th><th class="r">°C</th></tr></thead><tbody id="temps"></tbody></table>
+    </section>
+    <section>
+      <div class="hd"><h2>Events</h2><span class="aside" id="updated"></span></div>
+      <div class="log-scroll"><table class="log"><tbody id="log"></tbody></table></div>
+    </section>
+  </div>
+
+
+</section>
+
+<!-- ======================================================== add / edit -->
+<section class="view" id="v-edit" hidden>
+  <header class="page-head">
+    <div>
+      <div class="crumbs"><a href="#/">Overview</a> / <span id="e-crumb">Add server</span></div>
+      <h1 id="e-title">Add a server</h1>
+      <p class="lede" id="e-lede">Choose what you have, enter how to reach its management controller, and test the connection.</p>
+    </div>
+  </header>
+
+  <ol class="steps">
+    <li>
+      <h2><span class="n">1</span> Hardware</h2>
+      <div class="tiles" id="e-tiles" role="radiogroup" aria-label="Server type"></div>
+    </li>
+    <li id="e-step2" hidden>
+      <h2><span class="n">2</span> Connection</h2>
+      <div class="note" id="e-note"></div>
+      <form class="form" id="e-form" autocomplete="off">
+        <label>Name<input id="e-name" maxlength="60" required placeholder="Rack A"></label>
+        <label id="e-host-row">Address<input id="e-host" spellcheck="false" placeholder="192.168.1.120"><small id="e-host-help"></small></label>
+        <div class="two" id="e-cred-row">
+          <label>User<input id="e-user" spellcheck="false" autocomplete="off"></label>
+          <label>Password<input id="e-pass" type="password" autocomplete="new-password"></label>
+        </div>
+        <label class="check" id="e-tls-row"><input type="checkbox" id="e-tls"> Verify the TLS certificate <small>(leave off for the self-signed certificates BMCs ship with)</small></label>
+        <div class="result" id="e-result" hidden></div>
+        <div class="form-actions">
+          <button class="btn" type="button" id="e-test">Test connection</button>
+          <span class="spacer"></span>
+          <button class="btn danger" type="button" id="e-delete" hidden>Remove server</button>
+          <a class="btn" href="#/" id="e-cancel">Cancel</a>
+          <button class="btn primary" type="submit" id="e-save">Save</button>
+        </div>
+      </form>
+    </li>
+  </ol>
+</section>
+
+<!-- ======================================================== Prometheus -->
+<section class="view" id="v-prometheus" hidden>
+  <header class="page-head">
+    <div>
+      <h1>Prometheus</h1>
+      <p class="lede">Every temperature, fan and power reading from every server, ready to scrape.</p>
+    </div>
+    <span class="status-pill" id="pm-status"></span>
+  </header>
+  <div class="int-grid">
+    <div class="int-main">
+      <section class="int-step" id="pm-enable" hidden>
+        <h2><span class="n">1</span> Turn on the endpoint</h2>
+        <p>Metrics need a token, so that the dashboard password never has to go into Prometheus. Add one to
+          <code>docker-compose.yml</code> and recreate the container:</p>
+        <div class="code"><pre id="pm-env"></pre><button class="copy" data-copy="pm-env">Copy</button></div>
+      </section>
+      <section class="int-step">
+        <h2><span class="n" id="pm-n-scrape">2</span> Add a scrape job</h2>
+        <p>In <code>prometheus.yml</code>. Replace the address if Prometheus reaches this dashboard another way.</p>
+        <div class="code"><pre id="pm-scrape"></pre><button class="copy" data-copy="pm-scrape">Copy</button></div>
+        <p class="hint">The BMCs are read every <span id="pm-interval"></span> s, so scraping more often than that adds nothing.</p>
+      </section>
+      <section class="int-step">
+        <h2><span class="n" id="pm-n-check">3</span> Check it</h2>
+        <p>Prometheus → Status → Targets should show <b>idrac-fan-control</b> as <b>UP</b>. Then try
+          <code>idrac_cpu_temperature_celsius</code> in the query box.</p>
+      </section>
+    </div>
+    <aside class="int-side">
+      <h2>Metrics</h2>
+      <table class="metric-table"><tbody id="pm-metrics"></tbody></table>
+      <p class="hint">Every series carries <code>server</code>, <code>name</code> and <code>driver</code> labels.</p>
+    </aside>
+  </div>
+  <section class="int-live">
+    <div class="hd"><h2>Live output</h2><span class="aside"><input id="pm-filter" placeholder="Filter, e.g. cpu" spellcheck="false"> <button class="inline-btn" id="pm-refresh">Refresh</button></span></div>
+    <pre class="metrics-out" id="pm-out">Loading…</pre>
+  </section>
+</section>
+
+<!-- ======================================================== Grafana -->
+<section class="view" id="v-grafana" hidden>
+  <header class="page-head">
+    <div>
+      <h1>Grafana</h1>
+      <p class="lede">A ready-made dashboard for the Prometheus metrics: temperatures, fan speeds, power and who controls the fans.</p>
+    </div>
+    <a class="btn primary" href="/static/grafana.json" download="idrac-fan-control.json">Download dashboard</a>
+  </header>
+  <div class="int-grid">
+    <div class="int-main">
+      <section class="int-step">
+        <h2><span class="n">1</span> Collect the metrics</h2>
+        <p>The dashboard reads from Prometheus. If it is not scraping this dashboard yet, set that up first on the
+          <a href="#/prometheus">Prometheus</a> page.</p>
+      </section>
+      <section class="int-step">
+        <h2><span class="n">2</span> Import</h2>
+        <p>In Grafana: <b>Dashboards → New → Import</b>, upload <code>idrac-fan-control.json</code>, and pick your
+          Prometheus data source when asked.</p>
+        <a class="btn" href="/static/grafana.json" download="idrac-fan-control.json">Download idrac-fan-control.json</a>
+      </section>
+      <section class="int-step">
+        <h2><span class="n">3</span> Choose servers</h2>
+        <p>The <b>Server</b> drop-down at the top filters every panel. It lists the servers Prometheus has seen:
+          <span id="gf-servers"></span>.</p>
+      </section>
+    </div>
+    <aside class="int-side">
+      <h2>What is inside</h2>
+      <div class="panels" id="gf-panels"></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ======================================================== Homarr -->
+<section class="view" id="v-homarr" hidden>
+  <header class="page-head">
+    <div>
+      <h1>Homarr</h1>
+      <p class="lede">A read-only widget for Homarr or any dashboard that can show a web page, plus a status check for app tiles.</p>
+    </div>
+    <span class="status-pill" id="hm-status"></span>
+  </header>
+  <div class="int-grid">
+    <div class="int-main">
+      <section class="int-step" id="hm-enable" hidden>
+        <h2><span class="n">1</span> Turn on the widget</h2>
+        <p>The widget opens with a token instead of the dashboard password, and the token can only read. Add one to
+          <code>docker-compose.yml</code> and recreate the container:</p>
+        <div class="code"><pre id="hm-env"></pre><button class="copy" data-copy="hm-env">Copy</button></div>
+      </section>
+      <section class="int-step">
+        <h2><span class="n" id="hm-n-build">2</span> Build the widget address</h2>
+        <div class="builder">
+          <label>Server<select id="hm-server"></select></label>
+          <label>Theme<select id="hm-theme"><option value="">Follow the viewer</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
+          <label>Background<select id="hm-bg"><option value="">Transparent</option><option value="solid">Solid</option></select></label>
+        </div>
+        <div class="code"><pre id="hm-url"></pre><button class="copy" data-copy="hm-url">Copy</button></div>
+        <p class="hint">Replace <code>&lt;EMBED_TOKEN&gt;</code> with the value from <code>docker-compose.yml</code>; the dashboard never shows it.</p>
+      </section>
+      <section class="int-step">
+        <h2><span class="n" id="hm-n-add">3</span> Add it to Homarr</h2>
+        <p>Edit the board, add an <b>iFrame</b> widget and paste the address. About 380 × 230 fits it.</p>
+        <p>For an <b>app tile</b>, point it at this dashboard and use the status check below, which answers
+          <code>200</code> while every server is being read:</p>
+        <div class="code"><pre id="hm-health"></pre><button class="copy" data-copy="hm-health">Copy</button></div>
+      </section>
+    </div>
+    <aside class="int-side">
+      <h2>Preview</h2>
+      <div class="board" id="hm-board"><iframe id="hm-frame" title="Widget preview" loading="lazy"></iframe></div>
+      <p class="hint">Shown with your session; Homarr will use the token.</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ======================================================== Discord -->
+<section class="view" id="v-alerts" hidden>
+  <header class="page-head">
+    <div>
+      <h1>Discord</h1>
+      <p class="lede">Alerts when something needs you, and a status card that keeps itself up to date.</p>
+    </div>
+  </header>
   <section class="alerts" id="alerts">
     <div class="hd">
       <h2>Discord alerts</h2>
@@ -189,30 +416,13 @@
     </div>
   </section>
 
-  <div class="grid3">
-    <section>
-      <div class="hd"><h2>Fans</h2><span class="aside" id="fan-count"></span></div>
-      <table><thead><tr><th>Sensor</th><th></th><th class="r">RPM</th></tr></thead><tbody id="fans"></tbody></table>
-    </section>
-    <section>
-      <div class="hd"><h2>Temperatures</h2><span class="aside" id="temp-count"></span></div>
-      <table><thead><tr><th>Sensor</th><th></th><th class="r">°C</th></tr></thead><tbody id="temps"></tbody></table>
-    </section>
-    <section>
-      <div class="hd"><h2>Events</h2><span class="aside" id="updated"></span></div>
-      <div class="log-scroll"><table class="log"><tbody id="log"></tbody></table></div>
-    </section>
-  </div>
+</section>
 
-  <footer>
-    <span>Uses Dell's OEM IPMI fan commands. Supported on iDRAC 6, 7, 8 and iDRAC 9 up to firmware 3.30.30.30.</span>
-    <span><a href="https://github.com/ST-DEVPT/idrac-fan-control" target="_blank" rel="noopener">idrac-fan-control</a> <span id="version"></span></span>
-  </footer>
-</main>
+</div>
 
 <div class="toast" id="toast" role="status"></div>
-
 <script src="/static/app.js"></script>
 <script src="/static/alerts.js"></script>
+<script src="/static/integrations.js"></script>
 </body>
 </html>
