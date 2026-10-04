@@ -233,8 +233,8 @@
       </section>
       <section class="int-step">
         <h2><span class="n" id="pm-n-check">3</span> Check it</h2>
-        <p>Prometheus → Status → Targets should show <b>idrac-fan-control</b> as <b>UP</b>. Then try
-          <code>idrac_cpu_temperature_celsius</code> in the query box.</p>
+        <p>Prometheus → Status → Targets should show <b>fan-control</b> as <b>UP</b>. Then try
+          <code>fanctl_cpu_temperature_celsius</code> in the query box.</p>
       </section>
     </div>
     <aside class="int-side">
@@ -256,7 +256,7 @@
       <h1>Grafana</h1>
       <p class="lede">A ready-made dashboard for the Prometheus metrics: temperatures, fan speeds, power and who controls the fans.</p>
     </div>
-    <a class="btn primary" href="/static/grafana.json" download="idrac-fan-control.json">Download dashboard</a>
+    <a class="btn primary" href="/static/grafana.json" download="fan-control.json">Download dashboard</a>
   </header>
   <div class="int-grid">
     <div class="int-main">
@@ -267,9 +267,9 @@
       </section>
       <section class="int-step">
         <h2><span class="n">2</span> Import</h2>
-        <p>In Grafana: <b>Dashboards → New → Import</b>, upload <code>idrac-fan-control.json</code>, and pick your
+        <p>In Grafana: <b>Dashboards → New → Import</b>, upload <code>fan-control.json</code>, and pick your
           Prometheus data source when asked.</p>
-        <a class="btn" href="/static/grafana.json" download="idrac-fan-control.json">Download idrac-fan-control.json</a>
+        <a class="btn" href="/static/grafana.json" download="fan-control.json">Download fan-control.json</a>
       </section>
       <section class="int-step">
         <h2><span class="n">3</span> Choose servers</h2>

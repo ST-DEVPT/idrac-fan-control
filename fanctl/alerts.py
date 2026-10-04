@@ -208,7 +208,7 @@ def post_webhook(url, payload, method="POST"):
     """Send to Discord and return the message it created or edited (wait=true)."""
     req = urllib.request.Request(url + ("&" if "?" in url else "?") + "wait=true", data=json.dumps(payload).encode(),
                                  method=method, headers={"Content-Type": "application/json",
-                                                         "User-Agent": f"idrac-fan-control/{VERSION}"})
+                                                         "User-Agent": f"fan-control/{VERSION}"})
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.loads(r.read() or b"{}")
 

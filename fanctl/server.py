@@ -256,25 +256,27 @@ def unique_id(name, taken):
 
 
 def env_servers(env=os.environ):
-    """Servers declared in the environment: IDRAC_HOST/... for one, IDRAC_1_HOST/... for several.
-    IDRAC_DRIVER (or IDRAC_1_DRIVER) picks the hardware; Dell by default, demo for IDRAC_HOST=demo."""
-    numbered = sorted(int(m.group(1)) for k in env if (m := re.fullmatch(r"IDRAC_(\d+)_HOST", k)))
-    specs = [("", True)] if env.get("IDRAC_HOST") else []
-    specs += [(f"{n}_", False) for n in numbered]
+    """Servers declared in the environment: SERVER_1_HOST, SERVER_1_DRIVER, ... for each server.
+    1.x names still work: IDRAC_HOST/... for a single server and IDRAC_1_HOST/... for several.
+    The driver defaults to Dell (what 1.x supported), and to demo for HOST=demo."""
+    specs = [("IDRAC_", True)] if env.get("IDRAC_HOST") else []
+    for family in ("SERVER", "IDRAC"):
+        numbered = sorted(int(m.group(1)) for k in env if (m := re.fullmatch(family + r"_(\d+)_HOST", k)))
+        specs += [(f"{family}_{n}_", False) for n in numbered]
     out, taken = [], set()
     for prefix, legacy in specs:
-        host = env.get(f"IDRAC_{prefix}HOST", "")
-        driver = env.get(f"IDRAC_{prefix}DRIVER") or ("demo" if host == "demo" else "dell")
+        host = env.get(f"{prefix}HOST", "")
+        driver = env.get(f"{prefix}DRIVER") or ("demo" if host == "demo" else "dell")
         if driver not in DRIVERS:
-            print(f"WARNING: IDRAC_{prefix}DRIVER={driver} is unknown; use one of {', '.join(DRIVERS)}", flush=True)
+            print(f"WARNING: {prefix}DRIVER={driver} is unknown; use one of {', '.join(DRIVERS)}", flush=True)
             continue
-        name = env.get(f"IDRAC_{prefix}NAME") or ("Demo server" if driver == "demo" else host)
+        name = env.get(f"{prefix}NAME") or ("Demo server" if driver == "demo" else host)
         sid = unique_id(name, taken)
         taken.add(sid)
         out.append({"id": sid, "name": name, "driver": driver, "host": "" if driver == "demo" else host,
-                    "username": env.get(f"IDRAC_{prefix}USERNAME", "root"),
-                    "password": env.get(f"IDRAC_{prefix}PASSWORD", "calvin"),
-                    "verify_tls": env.get(f"IDRAC_{prefix}VERIFY_TLS", "").lower() in ("1", "true", "yes"),
+                    "username": env.get(f"{prefix}USERNAME", "root"),
+                    "password": env.get(f"{prefix}PASSWORD", "calvin"),
+                    "verify_tls": env.get(f"{prefix}VERIFY_TLS", "").lower() in ("1", "true", "yes"),
                     "source": "environment", "legacy": legacy})
     return out
 

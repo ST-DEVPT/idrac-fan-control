@@ -85,7 +85,7 @@ Before adding a server, prepare its BMC:
 - **HPE and other Redfish**: any account that can read the system health. Redfish uses HTTPS (port 443).
 - **HPE iLO 4 unlocked**: SSH (port 22) and HTTPS must both be reachable, and the firmware must be the patched 2.77.
 
-Images are built for `linux/amd64` and `linux/arm64`: `ghcr.io/st-devpt/idrac-fan-control:latest`,
+Images are built for `linux/amd64` and `linux/arm64`: `ghcr.io/st-devpt/rack-fan-control:latest`,
 or pin a version such as `:2.0`.
 
 ## Configuration
@@ -108,21 +108,21 @@ They show up in the dashboard like the others, but can only be changed in the en
 
 ```yaml
     environment:
-      IDRAC_1_NAME: Compute
-      IDRAC_1_DRIVER: dell              # dell, supermicro, ilo4-unlocked, redfish, ipmi or demo
-      IDRAC_1_HOST: 192.168.1.120       # "local" for IPMI from the server itself
-      IDRAC_1_USERNAME: root
-      IDRAC_1_PASSWORD: ${COMPUTE_BMC_PASSWORD}
-      IDRAC_2_NAME: DL360
-      IDRAC_2_DRIVER: redfish
-      IDRAC_2_HOST: 192.168.1.121
-      IDRAC_2_USERNAME: Administrator
-      IDRAC_2_PASSWORD: ${DL360_ILO_PASSWORD}
-      IDRAC_2_VERIFY_TLS: "false"       # BMCs ship self-signed certificates
+      SERVER_1_NAME: Compute
+      SERVER_1_DRIVER: dell              # dell, supermicro, ilo4-unlocked, redfish, ipmi or demo
+      SERVER_1_HOST: 192.168.1.120       # "local" for IPMI from the server itself
+      SERVER_1_USERNAME: root
+      SERVER_1_PASSWORD: ${COMPUTE_BMC_PASSWORD}
+      SERVER_2_NAME: DL360
+      SERVER_2_DRIVER: redfish
+      SERVER_2_HOST: 192.168.1.121
+      SERVER_2_USERNAME: Administrator
+      SERVER_2_PASSWORD: ${DL360_ILO_PASSWORD}
+      SERVER_2_VERIFY_TLS: "false"       # BMCs ship self-signed certificates
 ```
 
-The 1.x single-server variables (`IDRAC_HOST`, `IDRAC_USERNAME`, `IDRAC_PASSWORD`, `IDRAC_NAME`)
-still work and keep their settings.
+The 1.x variables still work and keep their settings: `IDRAC_HOST`, `IDRAC_USERNAME`, `IDRAC_PASSWORD`,
+`IDRAC_NAME` for one server and `IDRAC_1_HOST`, ... for several.
 
 ### What is stored in `/data`
 
@@ -217,7 +217,7 @@ Set `METRICS_TOKEN`, then scrape `/metrics`:
 
 ```yaml
 scrape_configs:
-  - job_name: idrac-fan-control
+  - job_name: fan-control
     authorization:
       credentials: <METRICS_TOKEN>
     static_configs:
@@ -226,13 +226,13 @@ scrape_configs:
 
 | Metric | Labels |
 | --- | --- |
-| `idrac_up`, `idrac_power_on`, `idrac_dell_control`, `idrac_failsafe_active` | `server`, `name` |
-| `idrac_cpu_temperature_celsius`, `idrac_inlet_temperature_celsius`, `idrac_exhaust_temperature_celsius` | `server`, `name` |
-| `idrac_fan_speed_percent`, `idrac_power_watts`, `idrac_last_update_timestamp_seconds` | `server`, `name` |
-| `idrac_temperature_celsius` | `server`, `name`, `sensor`, `entity` |
-| `idrac_fan_rpm` | `server`, `name`, `fan` |
+| `fanctl_up`, `fanctl_power_on`, `fanctl_bmc_control`, `fanctl_failsafe_active` | `server`, `name` |
+| `fanctl_cpu_temperature_celsius`, `fanctl_inlet_temperature_celsius`, `fanctl_exhaust_temperature_celsius` | `server`, `name` |
+| `fanctl_fan_speed_percent`, `fanctl_power_watts`, `fanctl_last_update_timestamp_seconds` | `server`, `name` |
+| `fanctl_temperature_celsius` | `server`, `name`, `sensor`, `entity` |
+| `fanctl_fan_rpm` | `server`, `name`, `fan` |
 
-Grafana: Dashboards → New → Import, upload `idrac-fan-control.json` (download it from the **Grafana** page of the dashboard, or `web/grafana.json` in this repository) and pick your
+Grafana: Dashboards → New → Import, upload `fan-control.json` (download it from the **Grafana** page of the dashboard, or `web/grafana.json` in this repository) and pick your
 Prometheus data source.
 
 ## Homarr and other dashboards

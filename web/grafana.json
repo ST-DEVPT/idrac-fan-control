@@ -34,8 +34,8 @@
       "version": ""
     }
   ],
-  "title": "iDRAC Fan Control",
-  "uid": "idrac-fan-control",
+  "title": "Fan Control",
+  "uid": "fan-control",
   "tags": [
     "dell",
     "idrac",
@@ -62,10 +62,10 @@
           "uid": "${DS_PROMETHEUS}"
         },
         "query": {
-          "query": "label_values(idrac_up, server)",
+          "query": "label_values(fanctl_up, server)",
           "refId": "server"
         },
-        "definition": "label_values(idrac_up, server)",
+        "definition": "label_values(fanctl_up, server)",
         "refresh": 2,
         "multi": true,
         "includeAll": true,
@@ -102,7 +102,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "max(idrac_cpu_temperature_celsius{server=~\"$server\"})",
+          "expr": "max(fanctl_cpu_temperature_celsius{server=~\"$server\"})",
           "legendFormat": "",
           "refId": "A"
         }
@@ -169,7 +169,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "max(idrac_fan_speed_percent{server=~\"$server\"}) or (max(idrac_dell_control{server=~\"$server\"}) * 0 - 1)",
+          "expr": "max(fanctl_fan_speed_percent{server=~\"$server\"}) or (max(fanctl_bmc_control{server=~\"$server\"}) * 0 - 1)",
           "legendFormat": "",
           "refId": "A"
         }
@@ -238,7 +238,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "avg(idrac_fan_rpm{server=~\"$server\"})",
+          "expr": "avg(fanctl_fan_rpm{server=~\"$server\"})",
           "legendFormat": "",
           "refId": "A"
         }
@@ -297,7 +297,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "max(idrac_inlet_temperature_celsius{server=~\"$server\"})",
+          "expr": "max(fanctl_inlet_temperature_celsius{server=~\"$server\"})",
           "legendFormat": "",
           "refId": "A"
         }
@@ -356,7 +356,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(idrac_power_watts{server=~\"$server\"})",
+          "expr": "sum(fanctl_power_watts{server=~\"$server\"})",
           "legendFormat": "",
           "refId": "A"
         }
@@ -415,7 +415,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "min(idrac_up{server=~\"$server\"}) * 2 - max(idrac_failsafe_active{server=~\"$server\"})",
+          "expr": "min(fanctl_up{server=~\"$server\"}) * 2 - max(fanctl_failsafe_active{server=~\"$server\"})",
           "legendFormat": "",
           "refId": "A"
         }
@@ -500,7 +500,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "idrac_cpu_temperature_celsius{server=~\"$server\"}",
+          "expr": "fanctl_cpu_temperature_celsius{server=~\"$server\"}",
           "legendFormat": "CPU \u00b7 {{name}}",
           "refId": "A"
         },
@@ -509,7 +509,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "idrac_exhaust_temperature_celsius{server=~\"$server\"}",
+          "expr": "fanctl_exhaust_temperature_celsius{server=~\"$server\"}",
           "legendFormat": "Exhaust \u00b7 {{name}}",
           "refId": "B"
         },
@@ -518,7 +518,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "idrac_inlet_temperature_celsius{server=~\"$server\"}",
+          "expr": "fanctl_inlet_temperature_celsius{server=~\"$server\"}",
           "legendFormat": "Inlet \u00b7 {{name}}",
           "refId": "C"
         }
@@ -573,7 +573,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "idrac_fan_speed_percent{server=~\"$server\"}",
+          "expr": "fanctl_fan_speed_percent{server=~\"$server\"}",
           "legendFormat": "Set \u00b7 {{name}}",
           "refId": "A"
         }
@@ -646,7 +646,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "idrac_fan_rpm{server=~\"$server\"}",
+          "expr": "fanctl_fan_rpm{server=~\"$server\"}",
           "legendFormat": "{{fan}} \u00b7 {{name}}",
           "refId": "A"
         }
@@ -701,7 +701,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "idrac_power_watts{server=~\"$server\"}",
+          "expr": "fanctl_power_watts{server=~\"$server\"}",
           "legendFormat": "{{name}}",
           "refId": "A"
         }
@@ -756,7 +756,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "idrac_dell_control{server=~\"$server\"}",
+          "expr": "fanctl_bmc_control{server=~\"$server\"}",
           "legendFormat": "Dell automatic \u00b7 {{name}}",
           "refId": "A"
         },
@@ -765,7 +765,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "idrac_failsafe_active{server=~\"$server\"}",
+          "expr": "fanctl_failsafe_active{server=~\"$server\"}",
           "legendFormat": "Failsafe \u00b7 {{name}}",
           "refId": "B"
         }

@@ -19,6 +19,10 @@ class Environment(unittest.TestCase):
         self.assertEqual((s[1]["host"], s[1]["driver"]), ("b", "redfish"))
         self.assertEqual(env_servers({"IDRAC_1_HOST": "x", "IDRAC_1_DRIVER": "bogus"}), [])
 
+    def test_server_prefix(self):
+        s = env_servers({"SERVER_1_HOST": "10.0.0.7", "SERVER_1_DRIVER": "supermicro", "SERVER_1_NAME": "X11"})
+        self.assertEqual((s[0]["id"], s[0]["driver"], s[0]["legacy"]), ("x11", "supermicro", False))
+
     def test_loaded(self):
         self.assertEqual(list(SERVERS)[:2], ["rack-a", "rack-b"])
         self.assertEqual(SERVERS["rack-a"].driver.kind, "demo")

@@ -12,7 +12,10 @@
 - Prometheus, Grafana and Homarr each have their own page: generated scrape config and live metrics,
   dashboard download with import steps, and a widget address builder with a live preview.
 - "Dell" mode is now "Automatic"; saved settings are converted.
-- Metrics gain a `driver` label and `idrac_fan_percent` for BMCs that report fan speed in percent.
+- **Renamed for what it has become.** The project is "Fan Control" (repository `rack-fan-control`).
+  Metrics are `fanctl_*` instead of `idrac_*` (`idrac_dell_control` is now `fanctl_bmc_control`), with a
+  `driver` label and a new `fanctl_fan_percent`; re-import the Grafana dashboard. Servers in the environment
+  use `SERVER_<n>_*`; the 1.x `IDRAC_*` variables keep working.
 - Redfish requests refuse redirects, so credentials never follow a redirect to another host.
 
 ## [1.2.0]

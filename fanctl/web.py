@@ -68,29 +68,29 @@ def metrics(servers):
         lab = ",".join('%s="%s"' % (k, esc(v)) for k, v in labels.items())
         rows.append(f"{name}{{{lab}}} {value:.15g}")
 
-    add("idrac_fan_control_info", "Build information.", {"version": VERSION}, 1)
+    add("fanctl_info", "Build information.", {"version": VERSION}, 1)
     for s in list(servers.values()):
         st, sens = s.state, s.state["sensors"] or {}
         lbl = {"server": s.id, "name": s.name, "driver": s.driver.kind}
-        add("idrac_up", "1 if the last BMC reading succeeded.", lbl, 0 if st["error"] or not st["updated"] else 1)
-        add("idrac_last_update_timestamp_seconds", "Unix time of the last reading.", lbl, st["updated"])
-        add("idrac_power_on", "1 if the server is powered on.", lbl,
+        add("fanctl_up", "1 if the last BMC reading succeeded.", lbl, 0 if st["error"] or not st["updated"] else 1)
+        add("fanctl_last_update_timestamp_seconds", "Unix time of the last reading.", lbl, st["updated"])
+        add("fanctl_power_on", "1 if the server is powered on.", lbl,
             None if st["power"] is None else int(st["power"] == "on"))
-        add("idrac_dell_control", "1 if the BMC's own fan control is active (any vendor).", lbl,
+        add("fanctl_bmc_control", "1 if the BMC's own fan control is active.", lbl,
             None if st["effective"] is None else int(st["effective"] != "manual"))
-        add("idrac_failsafe_active", "1 while the failsafe temperature has handed control to the BMC.",
+        add("fanctl_failsafe_active", "1 while the failsafe temperature has handed control to the BMC.",
             lbl, int(st["failsafe"]))
-        add("idrac_fan_speed_percent", "Fan speed set by the controller (absent in automatic mode).", lbl, st["applied_speed"])
-        add("idrac_cpu_temperature_celsius", "Hottest CPU temperature.", lbl, st["cpu_temp"])
-        add("idrac_inlet_temperature_celsius", "Inlet air temperature.", lbl, sens.get("inlet"))
-        add("idrac_exhaust_temperature_celsius", "Exhaust air temperature.", lbl, sens.get("exhaust"))
-        add("idrac_power_watts", "System power draw.", lbl, sens.get("watts"))
+        add("fanctl_fan_speed_percent", "Fan speed set by the controller (absent in automatic mode).", lbl, st["applied_speed"])
+        add("fanctl_cpu_temperature_celsius", "Hottest CPU temperature.", lbl, st["cpu_temp"])
+        add("fanctl_inlet_temperature_celsius", "Inlet air temperature.", lbl, sens.get("inlet"))
+        add("fanctl_exhaust_temperature_celsius", "Exhaust air temperature.", lbl, sens.get("exhaust"))
+        add("fanctl_power_watts", "System power draw.", lbl, sens.get("watts"))
         for t in sens.get("temps", []):
-            add("idrac_temperature_celsius", "Temperature sensor reading.",
+            add("fanctl_temperature_celsius", "Temperature sensor reading.",
                 {**lbl, "sensor": t["name"], "entity": t["entity"]}, t["value"])
         for f in sens.get("fans", []):
-            add("idrac_fan_rpm", "Fan speed in RPM.", {**lbl, "fan": f["name"]}, f["rpm"])
-            add("idrac_fan_percent", "Fan speed in percent, as reported by the BMC.", {**lbl, "fan": f["name"]}, f["pct"])
+            add("fanctl_fan_rpm", "Fan speed in RPM.", {**lbl, "fan": f["name"]}, f["rpm"])
+            add("fanctl_fan_percent", "Fan speed in percent, as reported by the BMC.", {**lbl, "fan": f["name"]}, f["pct"])
     return "\n".join(row for rows in out.values() for row in rows) + "\n"
 
 
@@ -115,7 +115,7 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "idrac-fan-control"
+    server_version = "fan-control"
     sys_version = ""
     timeout = 30  # drop clients that open a connection and never finish the request
 

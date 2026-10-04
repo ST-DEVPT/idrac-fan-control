@@ -3,19 +3,19 @@
 let integ = null, grafanaPanels = null;
 
 const METRICS = [
-  ["idrac_up", "1 if the last BMC reading succeeded"],
-  ["idrac_cpu_temperature_celsius", "Hottest CPU"],
-  ["idrac_inlet_temperature_celsius", "Inlet air"],
-  ["idrac_exhaust_temperature_celsius", "Exhaust air"],
-  ["idrac_temperature_celsius", "Every temperature sensor (+ sensor, entity)"],
-  ["idrac_fan_rpm", "Fan speed in RPM (+ fan)"],
-  ["idrac_fan_percent", "Fan speed in % as the BMC reports it (+ fan)"],
-  ["idrac_fan_speed_percent", "Speed set by this controller"],
-  ["idrac_power_watts", "Power draw"],
-  ["idrac_power_on", "1 if the server is on"],
-  ["idrac_dell_control", "1 while the BMC's own fan control is active"],
-  ["idrac_failsafe_active", "1 while the failsafe holds"],
-  ["idrac_last_update_timestamp_seconds", "Time of the last reading"],
+  ["fanctl_up", "1 if the last BMC reading succeeded"],
+  ["fanctl_cpu_temperature_celsius", "Hottest CPU"],
+  ["fanctl_inlet_temperature_celsius", "Inlet air"],
+  ["fanctl_exhaust_temperature_celsius", "Exhaust air"],
+  ["fanctl_temperature_celsius", "Every temperature sensor (+ sensor, entity)"],
+  ["fanctl_fan_rpm", "Fan speed in RPM (+ fan)"],
+  ["fanctl_fan_percent", "Fan speed in % as the BMC reports it (+ fan)"],
+  ["fanctl_fan_speed_percent", "Speed set by this controller"],
+  ["fanctl_power_watts", "Power draw"],
+  ["fanctl_power_on", "1 if the server is on"],
+  ["fanctl_bmc_control", "1 while the BMC's own fan control is active"],
+  ["fanctl_failsafe_active", "1 while the failsafe holds"],
+  ["fanctl_last_update_timestamp_seconds", "Time of the last reading"],
 ];
 
 async function loadIntegrations() {
@@ -46,7 +46,7 @@ function renderPrometheus() {
   $("#pm-n-check").textContent = on ? "2" : "3";
   $("#pm-env").textContent = `environment:\n  METRICS_TOKEN: ${randomToken()}`;
   const auth = integ.metrics_open ? "" : `    authorization:\n      credentials: <METRICS_TOKEN>\n`;
-  $("#pm-scrape").textContent = `scrape_configs:\n  - job_name: idrac-fan-control\n    scrape_interval: ${Math.max(15, integ.interval)}s\n` +
+  $("#pm-scrape").textContent = `scrape_configs:\n  - job_name: fan-control\n    scrape_interval: ${Math.max(15, integ.interval)}s\n` +
     (location.protocol === "https:" ? "    scheme: https\n" : "") + auth +
     `    static_configs:\n      - targets: ["${location.host}"]`;
   $("#pm-interval").textContent = integ.interval;

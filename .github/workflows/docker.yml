@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     tags: ["v*"]
   pull_request:
 
@@ -32,7 +32,7 @@ jobs:
       - name: Start with a demo server and sign-in
         run: |
           mkdir data && sudo chown 1000:1000 data
-          docker run -d --name fanctl -p 8080:8080 -v "$PWD/data:/data"             -e WEB_PASSWORD=ci -e IDRAC_1_HOST=demo -e CHECK_INTERVAL=5 --read-only --cap-drop ALL fanctl:test
+          docker run -d --name fanctl -p 8080:8080 -v "$PWD/data:/data"             -e WEB_PASSWORD=ci -e SERVER_1_HOST=demo -e CHECK_INTERVAL=5 --read-only --cap-drop ALL fanctl:test
       - name: Check it answers
         run: |
           for i in $(seq 30); do curl -fs localhost:8080/healthz && break; sleep 1; done
@@ -47,7 +47,8 @@ jobs:
 
   image:
     needs: [test, container]
-    if: github.event_name == 'push'
+    # images are only published from main (latest) and version tags
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     permissions:
       contents: read

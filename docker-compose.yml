@@ -1,6 +1,6 @@
 services:
   fan-control:
-    image: ghcr.io/st-devpt/idrac-fan-control:latest
+    image: ghcr.io/st-devpt/rack-fan-control:latest
     container_name: fan-control
     restart: unless-stopped
     ports:
@@ -12,11 +12,11 @@ services:
       CHECK_INTERVAL: 15          # seconds between readings (minimum 5)
       # Servers are added in the dashboard. They can also be declared here, which makes
       # them read-only in the dashboard:
-      # IDRAC_1_NAME: Rack A
-      # IDRAC_1_DRIVER: dell      # dell, supermicro, ilo4-unlocked, redfish, ipmi or demo
-      # IDRAC_1_HOST: 192.168.1.120
-      # IDRAC_1_USERNAME: root
-      # IDRAC_1_PASSWORD: calvin
+      # SERVER_1_NAME: Rack A
+      # SERVER_1_DRIVER: dell      # dell, supermicro, ilo4-unlocked, redfish, ipmi or demo
+      # SERVER_1_HOST: 192.168.1.120
+      # SERVER_1_USERNAME: root
+      # SERVER_1_PASSWORD: calvin
       # METRICS_TOKEN: a-long-random-string   # Prometheus: Authorization: Bearer <token>
       # EMBED_TOKEN: another-random-string    # read-only widget for Homarr and similar
     read_only: true
