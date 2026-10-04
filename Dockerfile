@@ -6,7 +6,8 @@ RUN apk add --no-cache ipmitool openssh-client sshpass \
  && mkdir /data && chown app:app /data
 
 WORKDIR /app
-COPY app.py drivers.py ./
+COPY app.py ./
+COPY fanctl ./fanctl
 COPY web ./web
 
 ARG VERSION=dev

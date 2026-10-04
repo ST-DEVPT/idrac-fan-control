@@ -319,10 +319,12 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ```bash
 python app.py                   # dashboard on http://localhost:8080; add a "Demo server" to try it
-python test_app.py              # self-check: drivers, control logic, sessions, HTTP, alerts
+python -m unittest              # tests: drivers, control logic, server registry, alerts, HTTP
 ```
 
-Python 3.10 or newer, no dependencies. `drivers.py` holds one class per kind of server: adding a vendor
+Python 3.10 or newer, no dependencies. The code is in `fanctl/`: `drivers.py` (how each kind of BMC is read
+and driven), `control.py` (decisions, no I/O), `server.py` (control loop and server registry), `alerts.py`
+(Discord) and `web.py` (HTTP and metrics); `app.py` starts it all. `drivers.py` holds one class per kind of server: adding a vendor
 means implementing `read()` and, if it can control fans, `set_speed()` and `set_auto()`. The web pages are
 in `web/`, served with a strict Content-Security-Policy, so scripts and styles live in their own files.
 

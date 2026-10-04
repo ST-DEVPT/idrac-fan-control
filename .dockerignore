@@ -1,4 +1,5 @@
 *
 !app.py
-!drivers.py
+!fanctl
 !web
+fanctl/__pycache__
