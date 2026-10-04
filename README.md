@@ -1,31 +1,47 @@
 # Fan Control
 
 **Quiet rack servers, without cooking them.** A self-hosted dashboard for Dell PowerEdge, Supermicro,
-HPE ProLiant and any Redfish or IPMI server: it takes over fan control where the vendor allows it,
-follows a temperature curve you draw, hands control back to the BMC the moment anything looks wrong,
-and watches everything else.
+HPE ProLiant and any Redfish or IPMI server. It takes over fan control where the vendor allows it, holds
+the temperatures you choose, hands control back to the BMC the moment anything looks wrong, and watches
+everything else.
 
-[![CI](https://github.com/ST-DEVPT/idrac-fan-control/actions/workflows/docker.yml/badge.svg)](https://github.com/ST-DEVPT/idrac-fan-control/actions/workflows/docker.yml)
-[![Release](https://img.shields.io/github/v/release/ST-DEVPT/idrac-fan-control)](https://github.com/ST-DEVPT/idrac-fan-control/releases)
-[![Image](https://img.shields.io/badge/image-ghcr.io-blue)](https://github.com/ST-DEVPT/idrac-fan-control/pkgs/container/idrac-fan-control)
+[![CI](https://github.com/ST-DEVPT/rack-fan-control/actions/workflows/docker.yml/badge.svg)](https://github.com/ST-DEVPT/rack-fan-control/actions/workflows/docker.yml)
+[![Release](https://img.shields.io/github/v/release/ST-DEVPT/rack-fan-control)](https://github.com/ST-DEVPT/rack-fan-control/releases)
+[![Image](https://img.shields.io/badge/image-ghcr.io-blue)](https://github.com/ST-DEVPT/rack-fan-control/pkgs/container/rack-fan-control)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.jpg">
-  <img alt="Dashboard: live readings, history chart and fan curve" src="docs/dashboard-light.jpg">
-</picture>
+<img alt="Overview: two servers under fan control and an HPE server that cannot be reached" src="docs/overview.jpg">
+
+<img alt="A server's page: live readings and history" src="docs/server.jpg">
 
 ## Highlights
 
-- **Every server in one place**: an overview of the whole rack, and a page per server.
-- **Add servers from the browser**: pick the hardware, enter the BMC address, test the connection, save.
-- **Fixed speed or a fan curve** you drag into shape, with the BMC's automatic mode one click away.
-- **Fails safe**: a failsafe temperature, missing readings, a refused command, a crash or `docker stop`
-  all hand the fans back to the BMC.
-- **Smooth**: fans speed up at once and slow down only after a delay, so they don't hunt up and down.
-- **Discord**: alerts you can fully customise, plus a status card that keeps itself up to date.
-- **Prometheus metrics**, a ready-made **Grafana** dashboard and a widget for **Homarr**.
+- **Every server in one place**: an overview of the rack and a page per server, added from the browser
+  with a connection test, or detected automatically from the BMC.
+- **Smart mode**: finds the slowest fan speed that holds the CPU at a target and keeps every other sensor
+  clear of its limits. Or draw a curve, or pick a fixed speed.
+- **Safe by design**: the BMC takes over on a CPU failsafe, on hot exhaust air, when any sensor nears the
+  warning level its BMC defines, on missing readings, refused commands, crashes and `docker stop`.
+  A minimum speed and a dry-run mode for trying things out.
+- **Quiet hours**, ramp-down smoothing, curve presets, and 3 h / 24 h / 7 d history that survives restarts.
+- **Discord** alerts you can fully customise, and a status card that keeps itself up to date.
+- **Prometheus**, a ready-made **Grafana** dashboard, a **Homarr** widget, each with its own setup page.
+- **Read-only accounts**, backups, English or Portuguese, °C or °F.
 - **Small and private**: plain Python, no dependencies, no third-party requests, runs as non-root.
+
+## Contents
+
+[Supported hardware](#supported-hardware) ·
+[Quick start](#quick-start) ·
+[Configuration](#configuration) ·
+[Fan control](#fan-control) ·
+[Discord](#discord) ·
+[Integrations](#integrations) ·
+[Accounts and security](#accounts-and-security) ·
+[Backup](#backup) ·
+[Troubleshooting](#troubleshooting) ·
+[Upgrading](#upgrading) ·
+[Development](#development)
 
 ## Supported hardware
 
@@ -39,23 +55,11 @@ and watches everything else.
 | **Demo** | Simulated readings | Yes (simulated) | — |
 
 Monitoring only means the vendor firmware offers no way to set fan speed. Those servers still get the
-overview card, history, Discord alerts and reports, metrics and the Homarr widget, which is often enough to
-find what makes a server loud: on HPE, a third-party PCIe card or disk the iLO cannot read is the usual cause.
+overview card, history, alerts, reports, metrics and the widget, which is often enough to find what makes
+a server loud: on HPE, a third-party PCIe card or disk the iLO cannot read is the usual cause.
 
 Dell iDRAC 9 from firmware 3.34.34.34, and iDRAC 10, no longer accept fan commands: add them as Redfish.
-
-## Contents
-
-[Quick start](#quick-start) ·
-[Configuration](#configuration) ·
-[Fan control](#fan-control) ·
-[Discord](#discord) ·
-[Prometheus and Grafana](#prometheus-and-grafana) ·
-[Homarr and other dashboards](#homarr-and-other-dashboards) ·
-[Reverse proxy and security](#reverse-proxy-and-security) ·
-[Troubleshooting](#troubleshooting) ·
-[Upgrading](#upgrading) ·
-[Development](#development)
+Not sure what you have? **Detect** on the *Add server* page asks the BMC and picks the type for you.
 
 ## Quick start
 
@@ -63,11 +67,11 @@ Dell iDRAC 9 from firmware 3.34.34.34, and iDRAC 10, no longer accept fan comman
 
 ```bash
 mkdir fan-control && cd fan-control
-curl -O https://raw.githubusercontent.com/ST-DEVPT/idrac-fan-control/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/ST-DEVPT/rack-fan-control/main/docker-compose.yml
 mkdir data && chown 1000:1000 data
 ```
 
-Set `WEB_PASSWORD` in `docker-compose.yml`, then:
+Set `WEB_PASSWORD` (and `TZ`) in `docker-compose.yml`, then:
 
 ```bash
 docker compose up -d
@@ -75,8 +79,9 @@ docker compose up -d
 
 **2. Open `http://<docker-host>:8080`**, sign in, and choose **Add server**.
 
-**3. Pick your hardware**, enter the BMC address, user and password, and press **Test connection**.
-The test reads the BMC once and shows the model, sensors and power draw before anything is saved.
+**3. Enter the BMC address** and press **Detect**, or pick the hardware yourself. Fill in the user and
+password and press **Test connection**: it reads the BMC once and shows the model, sensors and power draw
+before anything is saved.
 
 Before adding a server, prepare its BMC:
 
@@ -94,17 +99,20 @@ Servers, fan settings and Discord are configured in the dashboard. The environme
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `WEB_PASSWORD` | empty | Dashboard password. Empty disables sign-in; only do that on a trusted network |
+| `WEB_PASSWORD` | empty | Admin password. Empty disables sign-in; only do that on a trusted network |
+| `VIEW_PASSWORD` | empty | Optional read-only account: sees everything, changes nothing |
+| `TZ` | UTC | Time zone for quiet hours and the event log, e.g. `Europe/Lisbon` |
 | `CHECK_INTERVAL` | `15` | Seconds between readings and fan commands. Minimum 5 |
 | `DISCORD_WEBHOOK_URL` | empty | Default Discord webhook. A webhook pasted in the dashboard takes precedence |
 | `METRICS_TOKEN` | empty | Enables `/metrics` for Prometheus, with `Authorization: Bearer <token>` |
 | `EMBED_TOKEN` | empty | Enables the read-only `/embed` widget with `?token=<token>` |
+| `TRUST_PROXY` | off | Set to `true` behind a reverse proxy, so sign-in limits and the event log use `X-Forwarded-For` |
 | `PORT` | `8080` | HTTP port inside the container |
 
 ### Servers in the environment
 
 Servers can also be declared in `docker-compose.yml`, for example to keep credentials in a `.env` file.
-They show up in the dashboard like the others, but can only be changed in the environment. Number them:
+They show up in the dashboard like the others, but can only be changed in the environment:
 
 ```yaml
     environment:
@@ -129,8 +137,8 @@ The 1.x variables still work and keep their settings: `IDRAC_HOST`, `IDRAC_USERN
 | File | Contents |
 | --- | --- |
 | `servers.json` | Servers added in the dashboard, with their BMC passwords (file mode 600, never sent to the browser) |
-| `settings.json`, `settings-<server>.json` | Mode, fixed speed, curve, failsafe, ramp-down delay, PCIe setting |
-| `history-<server>.json` | The last three hours of readings and events, saved every 5 minutes and on stop |
+| `settings.json`, `settings-<server>.json` | Mode, curve, targets, limits, quiet hours and the other fan settings |
+| `history-<server>.json` | Three hours of readings, seven days of 5-minute averages, and the events |
 | `alerts.json` | Discord settings, including the webhook (file mode 600, never sent to the browser) |
 | `report-state.json` | Which Discord message the status card is edited into |
 | `known_hosts` | SSH host keys of unlocked iLO 4 servers, recorded on first connection |
@@ -143,53 +151,66 @@ For servers whose type has fan control (Dell, Supermicro, unlocked iLO 4):
 | Mode | What happens |
 | --- | --- |
 | **Automatic** | The BMC runs its factory profile. Loudest, and the fallback for every problem |
-| **Fixed** | Every fan at one speed while the CPU is below the failsafe |
-| **Curve** | Speed follows the hottest CPU along the points you drag. Double-click adds or removes a point |
+| **Fixed** | Every fan at one speed |
+| **Curve** | Speed follows the hottest CPU along points you drag. Start from a preset (quiet, balanced, cool, storage) or copy another server's curve |
+| **Smart** | Finds the slowest speed that holds the CPU at a target you set, and keeps every other sensor clear of its limits |
 
-**Failsafe temperature.** At or above it, the BMC takes over. Manual control resumes once the CPU
-is 3 °C below it, so the fans don't flap at the edge.
+### Smart mode
 
-**Ramp-down delay.** Fans speed up as soon as the curve asks for it, but slow down only after the lower
-speed has been asked for during the whole delay (60 s by default, 0 turns it off). It never runs the fans
-*slower* than the curve: it only keeps them faster for a little longer, which smooths out the noise of
-short load spikes. If the server settles at a temperature you don't like, raise the curve; the delay does
-not change where temperatures settle.
+A PI controller (proportional and integral) looks at the CPU against its target, the exhaust air against
+8 °C below its limit, and every sensor with a BMC warning threshold against 8 °C below the point where the
+failsafe would trip. It follows whichever is worst. It may raise the speed by 15 % in one step, lowers it by
+at most 0.2 % per second, and ignores corrections under 2 %, so you don't hear it hunting. At idle it rests
+on the minimum speed.
 
-**A starting curve** for a quiet homelab server with Xeon E5 processors:
+### Protection
 
-| CPU | 35 °C | 45 °C | 55 °C | 62 °C | 68 °C | failsafe |
-| --- | --- | --- | --- | --- | --- | --- |
-| Fans | 12 % | 15 % | 22 % | 35 % | 55 % | 72 °C |
+The BMC takes over, whatever the mode, when:
 
-Some BMCs raise fan alarms below about 10 %. Third-party PCIe cards (HBAs, 10 GbE NICs, GPUs) are not
-measured by the controller: with any of them installed, stay at 15 % or above, and on Dell leave the
+- the hottest CPU reaches the **CPU failsafe**;
+- the exhaust air reaches the **exhaust air limit** (on by default, empty turns it off);
+- any sensor comes within the margin (5 °C by default) of the **warning threshold its BMC defines**:
+  PCIe cards, disks, DIMMs, the RAID controller, which a CPU-only curve would never see;
+- there is no CPU reading, the server is off, a fan command is refused, the control loop fails, the
+  server is removed or the container stops.
+
+Manual control resumes once things are 3 °C below the limit that tripped, so the fans don't flap at the
+edge. Fans never run below the **minimum speed** in manual modes.
+
+**Dry run** decides and logs what it would send ("Dry run: would set fans to 25%"), but leaves the fans
+to the BMC. Use it to try a new server type or a new curve.
+
+### Smoothing and quiet hours
+
+**Ramp-down delay** (curve and fixed modes): fans speed up at once but slow down only after the lower speed
+has been asked for during the whole delay. It never runs the fans slower than the curve.
+
+**Quiet hours** cap the speed between two times of day, for example 23:00 to 07:00 at 25 %. Protection
+still applies at any hour.
+
+### A starting point
+
+For a quiet homelab server with Xeon E5 processors, the **Quiet** preset (35 °C → 12 %, 45 → 15, 55 → 22,
+62 → 35, 68 → 55) with a 72 °C failsafe, or **Smart** with a 60 °C target. Some BMCs raise fan alarms below
+about 10 %. With third-party PCIe cards installed, stay at 15 % or above, and on Dell leave the
 third-party PCIe cooling response **On**.
 
-**Per vendor.** Dell gets one IPMI command for all fans (some 11th-generation servers refuse it; the
-controller then finds the fans they accept and sets them one by one). Supermicro is put in *Full* fan mode
-and both zones are set; it goes back to *Optimal* when released. On an unlocked iLO 4 the controller caps
-every fan over SSH (`fan p N max`), so the iLO's own curve still runs underneath the cap; releasing removes
-the cap.
-
-**When something goes wrong** the fans go back to the BMC: no CPU reading, server powered off,
-a fan command refused, an exception in the control loop, the server being removed, the container stopping.
-The manual command is also re-sent on every cycle, because a BMC reset silently returns to automatic mode.
+**Per vendor.** Dell gets one IPMI command for all fans; some 11th-generation servers refuse it, and the
+controller then finds the fans they accept and sets them one by one. Supermicro is switched to *Full* fan
+mode once, then both zones are set; it goes back to *Optimal* when released. An unlocked iLO 4 gets a cap on
+every fan over SSH (`fan p N max`), so its own curve still runs underneath; releasing removes the cap.
 
 ## Discord
 
-Open the **Discord alerts** section of the dashboard and paste a webhook (Server Settings → Integrations
-→ Webhooks → Copy Webhook URL). Everything else is optional.
-
-- **Look**: bot name, avatar, footer, and a colour for each level (error, warning, resolved, info).
-- **Mentions**: nobody, `@here`, `@everyone`, a role or a user, only for the levels you choose.
-  Text that comes from a BMC can never ping anyone.
-- **Cooldown**: minimum time between two alerts of the same kind for the same server.
-- **Events**: turn each on or off and write its title and message. A live preview shows the result and
-  **Send test** posts it before you save.
+Open **Discord** in the sidebar and paste a webhook (Server Settings → Integrations → Webhooks → Copy
+Webhook URL). Everything else is optional: bot name, avatar, footer, a colour per level, mentions (nobody,
+`@here`, `@everyone`, a role or a user, only for the levels you choose), a cooldown, and which events to send,
+each with its own title and message. A live preview shows the result and **Send test** posts it before you
+save. Text that comes from a BMC can never ping anyone.
 
 | Event | Level | Sent when |
 | --- | --- | --- |
-| Failsafe reached | warning | The CPU reaches the failsafe and the BMC takes over |
+| Failsafe reached | warning | A limit trips and the BMC takes over |
 | Failsafe cleared | resolved | Manual control resumes |
 | Running hot | warning | The CPU passes the "running hot" temperature (off by default) |
 | BMC unreachable | error | Readings fail |
@@ -198,22 +219,23 @@ Open the **Discord alerts** section of the dashboard and paste a webhook (Server
 | Controller error | error | The control loop hits an unexpected error |
 | Settings changed | info | Someone applies new settings (off by default) |
 | Controller started | info | The container starts (off by default) |
-| Status report | info | On a schedule (off by default, see below) |
+| Status report | info | On a schedule (off by default) |
 
-Placeholders for titles and messages: `{server}` `{host}` `{model}` `{cpu}` `{speed}` `{mode}`
-`{reason}` `{error}` `{failsafe}` `{threshold}` `{interval}` `{time}`. Status reports add `{period}`
-`{cpu_min}` `{cpu_avg}` `{cpu_max}` `{speed_avg}` `{power_avg}` `{dell_pct}`.
+Placeholders: `{server}` `{host}` `{model}` `{cpu}` `{speed}` `{mode}` `{reason}` `{error}` `{failsafe}`
+`{threshold}` `{interval}` `{time}`; status reports add `{period}` `{cpu_min}` `{cpu_avg}` `{cpu_max}`
+`{speed_avg}` `{power_avg}` `{dell_pct}`.
 
-**Status report.** Every few minutes or hours, one card per server: CPU, fans and power now, minimum,
-average and maximum over the period, inlet and exhaust air, time spent in Dell mode, trend lines for CPU
-and fan speed, and the latest events. By default the same message is edited each time, so the channel
-holds one live status card; it can also post a new message each time.
+The **status report** is one card per server: CPU, fans and power now, minimum, average and maximum over
+the period, air temperatures, time under automatic control, trend lines and the latest events. By default
+the same message is edited each time, so the channel holds one live status card.
 
 <img alt="Discord status report" src="docs/discord-report.jpg" width="640">
 
-## Prometheus and Grafana
+## Integrations
 
-Set `METRICS_TOKEN`, then scrape `/metrics`:
+Each has its own page in the sidebar, with the snippets filled in for your setup.
+
+**Prometheus**: set `METRICS_TOKEN`; the page shows the scrape job to paste and the live `/metrics` output.
 
 ```yaml
 scrape_configs:
@@ -226,58 +248,45 @@ scrape_configs:
 
 | Metric | Labels |
 | --- | --- |
-| `fanctl_up`, `fanctl_power_on`, `fanctl_bmc_control`, `fanctl_failsafe_active` | `server`, `name` |
-| `fanctl_cpu_temperature_celsius`, `fanctl_inlet_temperature_celsius`, `fanctl_exhaust_temperature_celsius` | `server`, `name` |
-| `fanctl_fan_speed_percent`, `fanctl_power_watts`, `fanctl_last_update_timestamp_seconds` | `server`, `name` |
-| `fanctl_temperature_celsius` | `server`, `name`, `sensor`, `entity` |
-| `fanctl_fan_rpm` | `server`, `name`, `fan` |
+| `fanctl_up`, `fanctl_power_on`, `fanctl_bmc_control`, `fanctl_failsafe_active` | `server`, `name`, `driver` |
+| `fanctl_cpu_temperature_celsius`, `fanctl_inlet_temperature_celsius`, `fanctl_exhaust_temperature_celsius` | `server`, `name`, `driver` |
+| `fanctl_fan_speed_percent`, `fanctl_power_watts`, `fanctl_last_update_timestamp_seconds` | `server`, `name`, `driver` |
+| `fanctl_temperature_celsius` | ... `sensor`, `entity` |
+| `fanctl_fan_rpm`, `fanctl_fan_percent` | ... `fan` |
 
-Grafana: Dashboards → New → Import, upload `fan-control.json` (download it from the **Grafana** page of the dashboard, or `web/grafana.json` in this repository) and pick your
-Prometheus data source.
+**Grafana**: download the dashboard from the Grafana page (or `web/grafana.json`), then
+Dashboards → New → Import, and pick your Prometheus data source.
 
-## Homarr and other dashboards
-
-Set `EMBED_TOKEN` and use the read-only widget:
-
-```
-http://<docker-host>:8080/embed?server=<id>&token=<EMBED_TOKEN>&theme=dark&bg=solid
-```
-
-| Parameter | Values |
-| --- | --- |
-| `server` | Server id, as in the dashboard URL (`#server=<id>`). Defaults to the first server |
-| `token` | `EMBED_TOKEN`. Opens the read-only views only; it cannot sign in or change anything |
-| `theme` | `light` or `dark`. Defaults to the viewer's system theme |
-| `bg` | `solid` for the theme's background. Transparent by default |
+**Homarr** (or any dashboard that shows a web page): set `EMBED_TOKEN`; the page builds the widget address
+for the server, theme and background you pick, with a live preview. Add it as an *iFrame* widget, and use
+`/healthz` as the status check of an app tile.
 
 <img alt="Embed widget" src="docs/embed.jpg" width="380">
 
-In **Homarr**, add an *iFrame* widget with that URL, and an app tile pointing at the dashboard with its
-status check on `/healthz` (answers `200` while every server is being read).
+## Accounts and security
 
-## Reverse proxy and security
+- `WEB_PASSWORD` is the admin account. `VIEW_PASSWORD` adds a read-only one: everything is visible,
+  nothing can be changed, and the backup can't be downloaded.
+- Changes are written to the server's event log with the account and address that made them.
+- Failed sign-ins are slowed and limited to 5 per address in 10 minutes; one address guessing does not lock
+  out the others. Behind a proxy, set `TRUST_PROXY=true` so the real address is used.
+- Keep the dashboard on your LAN or VPN. With a reverse proxy on the same host, publish the port on
+  localhost only (`"127.0.0.1:8080:8080"`), forward to it, and keep the `Host` header (the default in
+  Nginx Proxy Manager). The session cookie gets the `Secure` flag when the proxy sends `X-Forwarded-Proto: https`.
 
-The dashboard can change how a server cools itself. Keep it on your LAN or VPN, set `WEB_PASSWORD`, and
-put a reverse proxy with TLS in front if you open it beyond your own machine. With the proxy on the same
-host, publish the port on localhost only:
+Details, and how to report a vulnerability, are in [SECURITY.md](SECURITY.md).
 
-```yaml
-    ports:
-      - "127.0.0.1:8080:8080"
-```
+## Backup
 
-In the proxy, forward to `http://127.0.0.1:8080` and keep the `Host` header (the default in
-Nginx Proxy Manager). The session cookie gets the `Secure` flag when the proxy sends
-`X-Forwarded-Proto: https`.
-
-Built in: signed `HttpOnly`, `SameSite=Strict` session cookies, slowed sign-in attempts, origin checks on
-every change, a strict Content-Security-Policy, request size and time limits, and a container that runs as
-uid 1000 with a read-only root filesystem and no capabilities. Details and how to report a vulnerability
-are in [SECURITY.md](SECURITY.md).
+The **Backup** page downloads the servers added in the dashboard, every server's fan settings and the
+Discord configuration as one JSON file, and imports such a file on this or another machine. Passwords and
+the webhook are included only when you tick the box; a backup without them restores the settings, but
+servers have to be added again with their passwords.
 
 ## Troubleshooting
 
-Use **Test connection** on the server's page (Edit) to see the BMC's answer without saving anything.
+Use **Test connection** (Edit on the server's page) to see the BMC's answer without saving anything, and
+**Dry run** to watch what the controller would do.
 
 | Message | Meaning |
 | --- | --- |
@@ -287,6 +296,7 @@ Use **Test connection** on the server's page (Edit) to see the BMC's answer with
 | `Redfish ...: HTTP 401` | Wrong user name or password |
 | `Redfish ...: timed out` | The BMC is not reachable on HTTPS from the container |
 | `SSH: ... (is the iLO firmware unlocked?)` | The iLO answered, but does not have the `fan` command: stock firmware |
+| `... near its N°C warning threshold` | A sensor other than the CPU is hot; see the Temperatures table, where each bar marks its threshold |
 | `ERROR: cannot write to /data` (container log) | The data folder is not owned by uid 1000 |
 
 ## Upgrading
@@ -295,16 +305,12 @@ Use **Test connection** on the server's page (Edit) to see the BMC's answer with
 docker compose pull && docker compose up -d
 ```
 
-**From 1.x:** servers declared with `IDRAC_*` variables keep working, with their settings and history,
-and are shown as defined in the environment. To manage one from the dashboard instead, add it there and
-remove its variables. The fan mode called "Dell" is now "Automatic"; saved settings are converted.
+**From 1.x:** the image is now `ghcr.io/st-devpt/rack-fan-control`; change it in your compose file.
+`IDRAC_*` variables keep working, with their settings and history. Metrics are renamed from `idrac_*` to
+`fanctl_*`: re-import the Grafana dashboard. The mode called "Dell" is now "Automatic"; saved settings are
+converted. Sessions from 1.x are signed out once.
 
-**From 1.0:** the container runs as uid 1000. Give it the data folder once:
-
-```bash
-chown -R 1000:1000 ./data
-```
-
+**From 1.0:** the container runs as uid 1000. Give it the data folder once with `chown -R 1000:1000 ./data`.
 With `IDRAC_HOST=local`, the container needs `/dev/ipmi0` and root to open it:
 
 ```yaml
@@ -319,16 +325,16 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ```bash
 python app.py                   # dashboard on http://localhost:8080; add a "Demo server" to try it
-python -m unittest              # tests: drivers, control logic, server registry, alerts, HTTP
+python -m unittest              # tests: drivers, control logic, smart mode, server registry, alerts, HTTP
 ```
 
 Python 3.10 or newer, no dependencies. The code is in `fanctl/`: `drivers.py` (how each kind of BMC is read
-and driven), `control.py` (decisions, no I/O), `server.py` (control loop and server registry), `alerts.py`
-(Discord) and `web.py` (HTTP and metrics); `app.py` starts it all. `drivers.py` holds one class per kind of server: adding a vendor
-means implementing `read()` and, if it can control fans, `set_speed()` and `set_auto()`. The web pages are
-in `web/`, served with a strict Content-Security-Policy, so scripts and styles live in their own files.
+and driven), `control.py` (decisions and smart mode, no I/O), `server.py` (control loop and server registry),
+`alerts.py` (Discord) and `web.py` (HTTP, sessions, metrics, backup); `app.py` starts it all. Adding a vendor
+means a class in `drivers.py` with `read()` and, if it can control fans, `set_speed()` and `set_auto()`.
+The web pages are in `web/`, served with a strict Content-Security-Policy; `web/i18n.js` holds the
+Portuguese translation.
 
 ## License
 
-[MIT](LICENSE). Bundled fonts: Archivo and IBM Plex Mono, under the SIL Open Font License
-(`web/fonts/`).
+[MIT](LICENSE). Bundled fonts: Archivo and IBM Plex Mono, under the SIL Open Font License (`web/fonts/`).

@@ -17,6 +17,22 @@
   `driver` label and a new `fanctl_fan_percent`; re-import the Grafana dashboard. Servers in the environment
   use `SERVER_<n>_*`; the 1.x `IDRAC_*` variables keep working.
 - Redfish requests refuse redirects, so credentials never follow a redirect to another host.
+- **Smart mode**: a PI controller that finds the slowest speed holding the CPU at a target while keeping
+  the exhaust air and every sensor with a BMC warning threshold clear of their limits.
+- **Protection beyond the CPU**: the BMC also takes over on hot exhaust air and when any sensor (PCIe cards,
+  disks, DIMMs, RAID controller) nears the warning threshold its own BMC defines. Minimum fan speed. Dry run.
+- **Quiet hours**: cap the fan speed between two times of day (`TZ` sets the time zone).
+- **History for 24 hours and 7 days**, as 5-minute averages kept on disk.
+- Curve presets (quiet, balanced, cool, storage) and copying the curve of another server.
+- **Detect**: the BMC is asked for its vendor and firmware, and the right server type is suggested.
+- **Read-only account** with `VIEW_PASSWORD`; changes are attributed in the event log; failed sign-ins are
+  limited per address (`TRUST_PROXY` to believe `X-Forwarded-For`).
+- **Backup**: export and import servers, settings and Discord, with passwords only when asked for.
+- Portuguese and °F, chosen per browser.
+- Supermicro switches to Full fan mode once instead of on every cycle. A server being removed or edited can
+  no longer receive a fan command after it was handed back to the BMC.
+- Code split into the `fanctl` package; tests use `unittest` (`python -m unittest`); CI starts the image and
+  checks it serves pages and a demo server before publishing.
 
 ## [1.2.0]
 
