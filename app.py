@@ -383,12 +383,13 @@ class Server:
         if power == "off":
             effective, target, reason = "dell", None, "server is powered off"
         speed = None
-        if effective == "manual":
-            speed = ramped(self.window, time.time(), target, settings["ramp_down_seconds"])
-            if speed > target:
-                reason += f", holding {speed}% for ramp-down"
-        else:
-            self.window.clear()
+        with self.lock:  # save_settings() clears the window from the HTTP thread
+            if effective == "manual":
+                speed = ramped(self.window, time.time(), target, settings["ramp_down_seconds"])
+            else:
+                self.window.clear()
+        if speed is not None and speed > target:
+            reason += f", holding {speed}% for ramp-down"
 
         error = None
         try:

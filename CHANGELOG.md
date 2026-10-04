@@ -11,6 +11,7 @@
 - Read-only `/embed` widget for Homarr and other dashboards (`EMBED_TOKEN`).
 - Per-fan commands for 11th-generation servers that refuse the "all fans" selector.
 - Fonts bundled: the dashboard makes no third-party requests.
+- Fixed a race between saving settings and the control loop that could briefly hand the fans to Dell mode.
 - Security: strict Content-Security-Policy, origin check on POST, request size and time limits,
   container runs as uid 1000 with a read-only root filesystem.
 

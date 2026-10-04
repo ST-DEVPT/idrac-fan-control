@@ -61,6 +61,11 @@ assert app.ramped(w, 59, 25, 60) == 40
 assert app.ramped(w, 61, 25, 60) == 25   # ...until the delay has passed
 assert app.ramped(w, 62, 50, 60) == 50   # higher demand applies at once
 assert app.ramped(deque(), 0, 30, 0) == 30
+# the delay may hold the fans faster than the curve asks, never slower
+w = deque()
+for step in range(500):
+    want = (step * 37) % 101
+    assert app.ramped(w, step * 5, want, 60) >= want
 
 cur = dict(app.DEFAULT_SETTINGS)
 assert app.validate_settings({"curve": [[60, 40], [30, 10]]}, cur)["curve"] == [[30, 10], [60, 40]]

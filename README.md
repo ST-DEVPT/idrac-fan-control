@@ -131,6 +131,10 @@ python test_app.py              # self-check
 
 Python 3.10 or newer, no dependencies.
 
+## Security
+
+See [SECURITY.md](SECURITY.md).
+
 ## License
 
 [MIT](LICENSE)
