@@ -597,3 +597,10 @@ body.viewer #control-body, body.viewer .alerts .al-grid, body.viewer .detect { p
 a.btn { display: inline-block; color: var(--ink); text-decoration: none; }
 .int-list { margin: 10px 0 0; padding-left: 20px; color: var(--ink-2); max-width: 70ch; line-height: 1.7; }
 body.viewer #hm-fields { pointer-events: none; opacity: .6; }
+
+/* tokens */
+.tok-new { display: flex; gap: 8px; max-width: 520px; margin: 4px 0 12px; }
+.tok-new input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--rule-2); border-radius: 6px; background: var(--surface); color: var(--ink); font: 13.5px var(--sans); }
+.tok-list { max-width: 760px; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+.tok-list td { padding: 7px 14px 7px 0; border-top: 1px solid var(--rule); }
+.tok-list td.r { text-align: right; padding-right: 0; }

@@ -24,10 +24,11 @@ It is not meant to be exposed to the internet.
 - **Browser hardening**: strict Content-Security-Policy (`script-src 'self'`, no inline scripts),
   `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: no-referrer`. Only the read-only `/embed` page
   may be framed.
-- **Tokens**: `EMBED_TOKEN` opens the widget page (`/embed`) and `GET /api/widget`, which returns only
-  the fields chosen on the Homarr page: never the BMC address, settings, events or error messages. It
-  never makes a change, and no longer reads `/api/state` or `/api/history`.
-  `METRICS_TOKEN` opens `/metrics` only. Neither can sign in.
+- **Tokens**: a widget token opens the widget page (`/embed`) and `GET /api/widget`, which returns only
+  the fields chosen on the Homarr page: never the BMC address, settings, events or error messages. A
+  metrics token opens `/metrics` only. Neither can sign in or make a change. Tokens created in the
+  dashboard are stored as a SHA-256 hash (`tokens.json`, mode 600), shown once, compared in constant time,
+  and can be revoked one by one; `EMBED_TOKEN` and `METRICS_TOKEN` from the environment work alongside.
 - **Credentials**: iDRAC passwords are read from the environment, passed to `ipmitool` through its
   environment (never on the command line), and never sent to the browser. `ipmitool` gets no other
   environment variables.

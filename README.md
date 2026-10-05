@@ -109,8 +109,8 @@ Servers, fan settings and Discord are configured in the dashboard. The environme
 | `TZ` | UTC | Time zone for quiet hours and the event log, e.g. `Europe/Lisbon` |
 | `CHECK_INTERVAL` | `15` | Seconds between readings and fan commands. Minimum 5 |
 | `DISCORD_WEBHOOK_URL` | empty | Default Discord webhook. A webhook pasted in the dashboard takes precedence |
-| `METRICS_TOKEN` | empty | Enables `/metrics` for Prometheus, with `Authorization: Bearer <token>` |
-| `EMBED_TOKEN` | empty | Enables the widgets: `/embed?token=<token>`, and `/api/widget` with the token as a Bearer credential |
+| `METRICS_TOKEN` | empty | A metrics token for `/metrics` (`Authorization: Bearer <token>`). Tokens can also be created on the Prometheus page |
+| `EMBED_TOKEN` | empty | A widget token for `/embed?token=` and `/api/widget`. Tokens can also be created on the Homarr page |
 | `TRUST_PROXY` | off | Set to `true` behind a reverse proxy, so sign-in limits and the event log use `X-Forwarded-For` |
 | `PORT` | `8080` | HTTP port inside the container |
 
@@ -272,13 +272,14 @@ the same message is edited each time, so the channel holds one live status card.
 
 Each has its own page in the sidebar, with the snippets filled in for your setup.
 
-**Prometheus**: set `METRICS_TOKEN`; the page shows the scrape job to paste and the live `/metrics` output.
+**Prometheus**: create a metrics token on the Prometheus page (or set `METRICS_TOKEN`); the page shows the
+scrape job to paste and the live `/metrics` output.
 
 ```yaml
 scrape_configs:
   - job_name: fan-control
     authorization:
-      credentials: <METRICS_TOKEN>
+      credentials: <metrics token>
     static_configs:
       - targets: ["<docker-host>:8080"]
 ```
@@ -294,13 +295,13 @@ scrape_configs:
 **Grafana**: download the dashboard from the Grafana page (or `web/grafana.json`), then
 Dashboards → New → Import, and pick your Prometheus data source.
 
-**Homarr**: set `EMBED_TOKEN`, then on the Homarr page:
+**Homarr**: on the Homarr page, create a widget token (one per dashboard, so each can be revoked), then:
 
 1. **Choose what widgets may show**: status, CPU, fans, power, inlet and exhaust air, the last-hour chart,
    the server model. The token reads those fields and nothing else: never the BMC address, settings,
    events or error messages.
 2. **Homarr 2.0**: download the native widget, import it under *Management → Custom Widgets*, and give it
-   `EMBED_TOKEN` as its Bearer credential. Homarr fetches `/api/widget` itself; the widget has options for
+   the widget token as its Bearer credential. Homarr fetches `/api/widget` itself; the widget has options for
    the server (or all of them), °C or °F, the chart and the air temperatures.
 3. **Any dashboard**: the page builds an *iFrame* address for one server or the whole rack, a theme, a
    background and the fields to show, with a live preview. Any frame size works: a short one drops the

@@ -46,11 +46,8 @@ async function renderIntegration(view) {
 function renderPrometheus() {
   const on = integ.metrics_token || integ.metrics_open;
   setStatus("#pm-status", on, integ.metrics_token ? "Enabled · token" : integ.metrics_open ? "Enabled · open" : "Off");
-  $("#pm-enable").hidden = on;
-  $("#pm-n-scrape").textContent = on ? "1" : "2";
-  $("#pm-n-check").textContent = on ? "2" : "3";
-  $("#pm-env").textContent = `environment:\n  METRICS_TOKEN: ${randomToken()}`;
-  const auth = integ.metrics_open ? "" : `    authorization:\n      credentials: <METRICS_TOKEN>\n`;
+  renderTokens("metrics");
+  const auth = integ.metrics_open ? "" : `    authorization:\n      credentials: <your metrics token>\n`;
   $("#pm-scrape").textContent = `scrape_configs:\n  - job_name: fan-control\n    scrape_interval: ${Math.max(15, integ.interval)}s\n` +
     (location.protocol === "https:" ? "    scheme: https\n" : "") + auth +
     `    static_configs:\n      - targets: ["${location.host}"]`;
@@ -73,10 +70,39 @@ function showMetrics() {
 $("#pm-filter").addEventListener("input", showMetrics);
 $("#pm-refresh").onclick = refreshMetrics;
 
-function randomToken() {
-  const a = new Uint8Array(24);
-  crypto.getRandomValues(a);
-  return [...a].map(b => b.toString(16).padStart(2, "0")).join("");
+// ---------------------------------------------------------------- tokens
+// Created here, stored as a hash, shown once. EMBED_TOKEN / METRICS_TOKEN from the environment are listed too.
+const fresh = {};  // kind -> the token just created, until the page changes
+function renderTokens(kind) {
+  const box = $(`.tokens[data-kind="${kind}"]`), admin = integ.role === "admin";
+  const rows = integ.tokens.filter(t => t.kind === kind);
+  const when = t => t ? new Date(t * 1000).toLocaleDateString() : translate("never");
+  box.innerHTML = `
+    ${admin ? `<form class="tok-new"><input name="name" maxlength="40" placeholder="${translate(kind === "widget" ? "Name, e.g. Homarr" : "Name, e.g. Prometheus")}"
+      aria-label="${translate("Token name")}" required><button class="btn">${translate("Create")}</button></form>` : ""}
+    ${fresh[kind] ? `<div class="code"><pre id="tok-${kind}">${esc(fresh[kind])}</pre><button class="copy" data-copy="tok-${kind}">Copy</button></div>
+      <p class="hint">${translate("Copy it now: only a hash of it is kept, so it is not shown again.")}</p>` : ""}
+    ${rows.length || integ.env_tokens[kind] ? `<table class="tok-list"><tbody>
+      ${integ.env_tokens[kind] ? `<tr><td><b>${kind === "widget" ? "EMBED_TOKEN" : "METRICS_TOKEN"}</b></td><td class="muted">${translate("from the environment")}</td><td></td></tr>` : ""}
+      ${rows.map(t => `<tr><td><b>${esc(t.name)}</b></td><td class="muted">${translate("created")} ${when(t.created)} · ${translate("last used")} ${when(t.used)}</td>
+        <td class="r">${admin ? `<button class="inline-btn" data-revoke="${esc(t.id)}" data-name="${esc(t.name)}">${translate("Revoke")}</button>` : ""}</td></tr>`).join("")}
+    </tbody></table>` : `<p class="hint">${translate("No token yet.")}</p>`}`;
+  const form = box.querySelector("form");
+  if (form) form.onsubmit = async e => {
+    e.preventDefault();
+    const r = await api("/api/tokens", { name: form.name.value, kind });
+    const d = await r.json();
+    if (!r.ok) return toast(d.error, true);
+    fresh[kind] = d.token;
+    await renderIntegration(route.view);
+  };
+  box.querySelectorAll("[data-revoke]").forEach(b => b.onclick = async () => {
+    if (!confirm(translate(`Revoke ${b.dataset.name}? Whatever uses it stops working.`))) return;
+    const r = await api("/api/tokens/revoke", { id: b.dataset.revoke });
+    if (!r.ok) return toast((await r.json()).error, true);
+    toast("Token revoked");
+    await renderIntegration(route.view);
+  });
 }
 
 // ---------------------------------------------------------------- Grafana
@@ -98,9 +124,7 @@ const WIDGET_LABELS = { status: "Status and mode", cpu: "CPU temperature", fans:
 
 function renderHomarr() {
   setStatus("#hm-status", integ.embed_token, integ.embed_token ? "Enabled" : "Off");
-  $("#hm-enable").hidden = integ.embed_token;
-  $$(".hm-n").filter(n => !n.closest("[hidden]")).forEach((n, i) => n.textContent = i + 1);
-  $("#hm-env").textContent = `environment:\n  EMBED_TOKEN: ${randomToken()}`;
+  renderTokens("widget");
   const options = integ.servers.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
   for (const sel of ["#hm-server", "#hm-cw-server"]) {
     const keep = $(sel).value;
@@ -126,7 +150,7 @@ function buildWidget() {
   if (shown.length < $$("#hm-show input").length) q.set("show", shown.join(","));
   const preview = "/embed?" + q;
   q.set("token", "TOKEN");
-  $("#hm-url").textContent = `${location.origin}/embed?${q}`.replace("TOKEN", "<EMBED_TOKEN>");
+  $("#hm-url").textContent = `${location.origin}/embed?${q}`.replace("TOKEN", fresh.widget || "<your widget token>");
   if ($("#hm-frame").getAttribute("src") !== preview) $("#hm-frame").src = preview;
   $("#hm-board").className = "board " + ($("#hm-theme").value || "auto");
   const d = new URLSearchParams({ base: $("#hm-base").value.trim().replace(/\/+$/, ""), server: $("#hm-cw-server").value || "all",

@@ -18,8 +18,9 @@ services:
       # SERVER_1_HOST: 192.168.1.120
       # SERVER_1_USERNAME: root
       # SERVER_1_PASSWORD: calvin
-      # METRICS_TOKEN: a-long-random-string   # Prometheus: Authorization: Bearer <token>
-      # EMBED_TOKEN: another-random-string    # read-only widget for Homarr and similar
+      # Tokens for Prometheus and the Homarr widgets are created in the dashboard. These work too:
+      # METRICS_TOKEN: a-long-random-string
+      # EMBED_TOKEN: another-random-string
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]

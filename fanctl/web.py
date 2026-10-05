@@ -10,10 +10,10 @@ import time
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlsplit
 
-from . import config
+from . import config, tokens
 from .alerts import (ALERT_KINDS, SAMPLE, alert_config, build_payload, build_report, post_webhook,
                      public_alert_config, save_alerts, validate_alerts, webhook_of)
-from .config import DATA_DIR, EMBED_TOKEN, INTERVAL, METRICS_TOKEN, VERSION, WEB, write_json
+from .config import DATA_DIR, INTERVAL, VERSION, WEB, write_json
 from .control import validate_settings
 from .drivers import DRIVERS, DriverError, detect, scan
 from .server import SERVERS, registry_lock, save_dashboard_servers, stalled, start, stop, unique_id, validate_server
@@ -380,7 +380,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.role():
             return True
         bearer = self.headers.get("Authorization", "").removeprefix("Bearer ")
-        return widget and (same_secret(self.query.get("token", [""])[0], EMBED_TOKEN) or same_secret(bearer, EMBED_TOKEN))
+        return widget and (tokens.check(self.query.get("token", [""])[0], "widget") or tokens.check(bearer, "widget"))
 
     def client(self):
         """The address to account sign-ins and changes to. X-Forwarded-For is only believed with
@@ -455,8 +455,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.file(path[8:], STATIC[path[8:]])
         if path == "/metrics":
             bearer = self.headers.get("Authorization", "").removeprefix("Bearer ")
-            if not (same_secret(bearer, METRICS_TOKEN) or (not config.WEB_PASSWORD and not METRICS_TOKEN)):
-                return self.send(401 if METRICS_TOKEN else 404, {"error": "metrics need METRICS_TOKEN"})
+            needed = tokens.any_token("metrics")
+            if not (tokens.check(bearer, "metrics") or (not config.WEB_PASSWORD and not needed)):
+                return self.send(401 if needed else 404, {"error": "metrics need a metrics token"})
             return self.send(200, metrics(SERVERS).encode(), "text/plain; version=0.0.4; charset=utf-8")
         if path == "/login":
             if self.authed():
@@ -544,9 +545,11 @@ class Handler(BaseHTTPRequestHandler):
                              headers=[("Content-Disposition", f'attachment; filename="fan-control-{stamp}.json"')])
         if path == "/api/integrations":
             # whether each integration is switched on; the tokens themselves never leave the server
-            return self.send(200, {"auth": bool(config.WEB_PASSWORD), "metrics_token": bool(METRICS_TOKEN),
-                                   "metrics_open": not config.WEB_PASSWORD and not METRICS_TOKEN,
-                                   "embed_token": bool(EMBED_TOKEN), "interval": INTERVAL,
+            return self.send(200, {"auth": bool(config.WEB_PASSWORD), "metrics_token": tokens.any_token("metrics"),
+                                   "metrics_open": not config.WEB_PASSWORD and not tokens.any_token("metrics"),
+                                   "embed_token": tokens.any_token("widget"), "interval": INTERVAL,
+                                   "tokens": tokens.public(), "role": self.role(),
+                                   "env_tokens": {"widget": bool(config.EMBED_TOKEN), "metrics": bool(config.METRICS_TOKEN)},
                                    "widget_fields": widget_fields(), "widget_all": WIDGET_FIELDS,
                                    "servers": [{"id": s.id, "name": s.name} for s in list(SERVERS.values())]})
         if path == "/api/metrics-preview":
@@ -687,6 +690,20 @@ class Handler(BaseHTTPRequestHandler):
                 save_dashboard_servers()
                 srv.log(f"Connection settings changed by {self.who()}")
             return self.send(200, srv.info())
+        if self.route == "/api/tokens":
+            try:
+                token, row = tokens.create(body.get("name"), body.get("kind"))
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+            print(time.strftime("%H:%M:%S"), f"INFO {row['kind']} token \"{row['name']}\" created by {self.who()}", flush=True)
+            return self.send(200, {"token": token, **row})
+        if self.route == "/api/tokens/revoke":
+            try:
+                tokens.revoke(str(body.get("id", "")))
+            except ValueError as e:
+                return self.send(404, {"error": str(e)})
+            print(time.strftime("%H:%M:%S"), f"INFO token {body.get('id')} revoked by {self.who()}", flush=True)
+            return self.send(200, {"ok": True})
         if self.route == "/api/widget-config":
             try:
                 save_widget_fields(body.get("fields"))

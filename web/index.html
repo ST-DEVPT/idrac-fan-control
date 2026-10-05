@@ -298,20 +298,20 @@
   </header>
   <div class="int-grid">
     <div class="int-main">
-      <section class="int-step" id="pm-enable" hidden>
-        <h2><span class="n">1</span> Turn on the endpoint</h2>
-        <p>Metrics need a token, so that the dashboard password never has to go into Prometheus. Add one to
-          <code>docker-compose.yml</code> and recreate the container:</p>
-        <div class="code"><pre id="pm-env"></pre><button class="copy" data-copy="pm-env">Copy</button></div>
+      <section class="int-step">
+        <h2><span class="n">1</span> Create a token</h2>
+        <p>Prometheus reads with a token, so the dashboard password never goes into its config. The token can
+          read the metrics and nothing else.</p>
+        <div class="tokens" data-kind="metrics"></div>
       </section>
       <section class="int-step">
-        <h2><span class="n" id="pm-n-scrape">2</span> Add a scrape job</h2>
+        <h2><span class="n">2</span> Add a scrape job</h2>
         <p>In <code>prometheus.yml</code>. Replace the address if Prometheus reaches this dashboard another way.</p>
         <div class="code"><pre id="pm-scrape"></pre><button class="copy" data-copy="pm-scrape">Copy</button></div>
         <p class="hint">The BMCs are read every <span id="pm-interval"></span> s, so scraping more often than that adds nothing.</p>
       </section>
       <section class="int-step">
-        <h2><span class="n" id="pm-n-check">3</span> Check it</h2>
+        <h2><span class="n">3</span> Check it</h2>
         <p>Prometheus → Status → Targets should show <b>fan-control</b> as <b>UP</b>. Then try
           <code>fanctl_cpu_temperature_celsius</code> in the query box.</p>
       </section>
@@ -374,11 +374,11 @@
   </header>
   <div class="int-grid">
     <div class="int-main">
-      <section class="int-step" id="hm-enable" hidden>
-        <h2><span class="n hm-n">1</span> Turn on widgets</h2>
-        <p>Widgets read with a token instead of the dashboard password, and the token reads only what you share
-          below. Add one to <code>docker-compose.yml</code> and recreate the container:</p>
-        <div class="code"><pre id="hm-env"></pre><button class="copy" data-copy="hm-env">Copy</button></div>
+      <section class="int-step">
+        <h2><span class="n hm-n">1</span> Create a token</h2>
+        <p>Widgets read with a token instead of the dashboard password, and a token reads only what you share
+          below. Create one per dashboard, so each can be revoked on its own.</p>
+        <div class="tokens" data-kind="widget"></div>
       </section>
       <section class="int-step">
         <h2><span class="n hm-n">2</span> Choose what widgets may show</h2>
@@ -396,7 +396,7 @@
         <p><a class="btn" id="hm-download" download="fan-control-homarr-widget.json">Download widget</a></p>
         <ol class="int-list">
           <li>In Homarr, open <b>Management → Custom Widgets</b> and import the file.</li>
-          <li>For the source credential pick <b>Bearer</b> and paste your <code>EMBED_TOKEN</code>. Homarr keeps it encrypted.</li>
+          <li>For the source credential pick <b>Bearer</b> and paste a widget token from step 1. Homarr keeps it encrypted.</li>
           <li>Edit a board, choose <b>Add board content</b> and pick <b>Fan Control</b>.</li>
         </ol>
       </section>
@@ -409,7 +409,7 @@
         </div>
         <div class="share" id="hm-show"></div>
         <div class="code"><pre id="hm-url"></pre><button class="copy" data-copy="hm-url">Copy</button></div>
-        <p class="hint">Replace <code>&lt;EMBED_TOKEN&gt;</code> with the value from <code>docker-compose.yml</code>; the dashboard never shows it.</p>
+        <p class="hint">Put in a widget token from step 1. The dashboard keeps only a hash of it, so it shows a token just once.</p>
         <p>In Homarr, add an <b>iFrame</b> widget and paste the address. Any size works: a short frame drops the chart first, then the footer.</p>
       </section>
       <section class="int-step">

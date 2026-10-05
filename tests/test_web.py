@@ -172,6 +172,33 @@ class HTTP(Base):
         finally:
             web.WIDGET_FILE.unlink(missing_ok=True)
 
+    def test_dashboard_tokens(self):
+        from fanctl import tokens
+        st, _, data = self.post("/api/tokens", {"name": "Homarr", "kind": "widget"})
+        made = json.loads(data)
+        self.assertEqual(st, 200)
+        self.assertTrue(made["token"].startswith("fc_"))
+        try:
+            self.assertEqual(self.req("GET", "/api/widget?token=" + made["token"])[0], 200)
+            self.assertEqual(self.req("GET", "/api/widget", headers={"Authorization": "Bearer " + made["token"]})[0], 200)
+            self.assertEqual(self.req("GET", "/metrics", headers={"Authorization": "Bearer " + made["token"]})[0], 401)
+            listed = json.loads(self.get("/api/integrations")[2])["tokens"]
+            self.assertNotIn(made["token"], json.dumps(listed))
+            self.assertNotIn(made["token"], tokens.TOKENS_FILE.read_text())       # only a hash on disk
+            self.assertEqual(self.post("/api/tokens", {"name": "", "kind": "widget"})[0], 400)
+            self.assertEqual(self.post("/api/tokens", {"name": "x", "kind": "admin"})[0], 400)
+            self.assertEqual(self.req("POST", "/api/tokens?token=e-token", {"name": "x", "kind": "widget"})[0], 401)
+        finally:
+            self.assertEqual(self.post("/api/tokens/revoke", {"id": made["id"]})[0], 200)
+        self.assertEqual(self.req("GET", "/api/widget?token=" + made["token"])[0], 401)
+        self.assertEqual(self.post("/api/tokens/revoke", {"id": made["id"]})[0], 404)
+        st, _, data = self.post("/api/tokens", {"name": "Prometheus", "kind": "metrics"})
+        made = json.loads(data)
+        try:
+            self.assertEqual(self.req("GET", "/metrics", headers={"Authorization": "Bearer " + made["token"]})[0], 200)
+        finally:
+            self.post("/api/tokens/revoke", {"id": made["id"]})
+
     def test_diagnostics(self):
         st, h, data = self.get("/api/servers/rack-a/diagnostics")
         self.assertEqual(st, 200)
