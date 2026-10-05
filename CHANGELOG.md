@@ -3,6 +3,22 @@
 Versions follow [semantic versioning](https://semver.org): a major version (`:2`) never removes a setting
 or changes what an existing one does, so pinning the image to it is safe.
 
+## [2.4.0] - 2026-10-05
+
+Security, from an independent review.
+
+- **X-Forwarded-For** is read from the right and only believed from trusted proxies (`TRUSTED_PROXIES`,
+  by default loopback and Docker's networks). Before, the leftmost address, which the client writes, was
+  used, so a client could dodge the sign-in limit by inventing a new address for every guess.
+- **Sessions can be revoked**: signing out ends that session on the server, even if the cookie was copied,
+  and **Sign out everywhere** on the Backup page ends them all. Sessions from before this version end once.
+- **BMC certificates are pinned on first use**: a Redfish BMC that suddenly shows another certificate is
+  refused instead of being sent the password. A replaced certificate is accepted from the server's page.
+- At most 64 requests at once; the table of failed sign-ins is bounded.
+- Alert channels refuse redirects to other hosts and link-local addresses.
+- Viewers can no longer read BMC account names; diagnostics leave the BMC address out of events too.
+- The BMC error box is announced to screen readers only when it changes.
+
 ## [2.3.0] - 2026-10-05
 
 Hardware safety: when the controller does not know, the BMC decides.

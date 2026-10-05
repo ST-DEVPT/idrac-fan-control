@@ -70,6 +70,13 @@ function showMetrics() {
 $("#pm-filter").addEventListener("input", showMetrics);
 $("#pm-refresh").onclick = refreshMetrics;
 
+// ---------------------------------------------------------------- sessions
+$("#sign-out-all").onclick = async () => {
+  if (!confirm(translate("Sign out every other browser and phone?"))) return;
+  const r = await api("/api/sessions/revoke-all", {});
+  toast(r.ok ? "Every other session is signed out" : "Could not sign the others out", !r.ok);
+};
+
 // ---------------------------------------------------------------- tokens
 // Created here, stored as a hash, shown once. EMBED_TOKEN / METRICS_TOKEN from the environment are listed too.
 const fresh = {};  // kind -> the token just created, until the page changes

@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from .config import DATA_DIR, DISCORD_WEBHOOK, INTERVAL, VERSION, read_json, write_json
 from .control import speed_text
+from .drivers import SameOriginRedirect
 
 # ---------------------------------------------------------------- alerts
 
@@ -294,8 +295,13 @@ def send_channel(cfg, channel, kind, values, prefix=""):
         body = {"event": kind, "level": level, "title": title, "message": message,
                 "server": values.get("server"), "time": datetime.now(timezone.utc).isoformat(),
                 "values": {k: str(v) for k, v in values.items()}}
+    host = urlsplit(url).hostname or ""
+    if host.startswith("169.254.") or host in ("metadata.google.internal",):
+        raise ValueError("link-local addresses are not alert channels")
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers=headers)
-    with urllib.request.urlopen(req, timeout=10) as r:
+    # a redirect to another host would carry the token along: refused, as for Redfish
+    opener = urllib.request.build_opener(SameOriginRedirect)
+    with opener.open(req, timeout=10) as r:
         r.read(65536)
 
 

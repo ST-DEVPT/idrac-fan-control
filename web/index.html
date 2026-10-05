@@ -73,7 +73,8 @@
       <a class="btn" id="s-edit" href="#/">Edit</a>
     </div>
   </header>
-  <div class="alert" id="alert" role="alert"><b id="alert-title"></b><span id="alert-msg"></span></div>
+  <div class="alert" id="alert" role="alert"><b id="alert-title"></b><span id="alert-msg"></span>
+    <button class="inline-btn" id="accept-cert" type="button" hidden>Accept the new certificate</button></div>
 
   <div class="readouts">
     <div class="ro"><div class="lbl">CPU <em id="cpu-name"></em></div><div class="v" id="v-cpu">—</div><div class="sub" id="s-cpu"></div><svg class="spark" id="sp-cpu"></svg></div>
@@ -456,6 +457,12 @@
         <p><input type="file" id="bk-file" accept="application/json,.json"></p>
         <div class="result" id="bk-preview" hidden></div>
         <p><button class="btn primary" id="bk-import" disabled>Import</button></p>
+      </section>
+      <section class="int-step">
+        <h2><span class="n">3</span> Sessions</h2>
+        <p>Signs out every browser and phone signed in to this dashboard, including any whose cookie was copied.
+          You stay signed in here. Changing a password does the same.</p>
+        <p><button class="btn" id="sign-out-all" type="button">Sign out everywhere</button></p>
       </section>
     </div>
   </div>

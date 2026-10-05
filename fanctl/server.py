@@ -24,6 +24,7 @@ class Server:
         self.id, self.name, self.host = cfg["id"], cfg["name"], cfg.get("host", "")
         self.driver = DRIVERS[cfg["driver"]](cfg.get("host", ""), cfg.get("username", ""), cfg.get("password", ""),
                                              cfg.get("verify_tls", False), str(DATA_DIR))
+        self.driver.pin = True  # remember the BMC's certificate (see drivers.PinnedHTTPSHandler)
         # the single-server setup of 1.0 keeps its settings file
         self.settings_file = DATA_DIR / ("settings.json" if cfg.get("legacy") else f"settings-{self.id}.json")
         self.history_file = DATA_DIR / f"history-{self.id}.json"

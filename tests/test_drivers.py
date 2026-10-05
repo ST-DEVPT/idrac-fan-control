@@ -1,3 +1,7 @@
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 from fanctl import drivers
@@ -259,6 +263,64 @@ class Diagnostics(unittest.TestCase):
         out = rf.diagnose()
         self.assertEqual(out["/redfish/v1/Chassis/1/Thermal/"]["Fans"][0]["FanName"], "Fan 1")
         self.assertEqual(out["/redfish/v1/Chassis/1/"]["SerialNumber"], "<redacted>")
+
+
+@unittest.skipUnless(shutil.which("openssl"), "needs openssl to make test certificates")
+class CertificatePinning(unittest.TestCase):
+    """A BMC that suddenly shows another certificate is refused: its password goes with every request."""
+
+    def make_cert(self, folder, name):
+        key, crt = os.path.join(folder, name + ".key"), os.path.join(folder, name + ".crt")
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=bmc",
+                        "-keyout", key, "-out", crt], check=True, capture_output=True)
+        return crt, key
+
+    def serve(self, cert):
+        import http.server
+        import ssl
+        import threading
+
+        class BMC(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = b'{"RedfishVersion": "1.0.0"}'
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+        srv = http.server.HTTPServer(("127.0.0.1", 0), BMC)
+        srv.handle_error = lambda *a: None  # the refused handshake is the point, not noise
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(*cert)
+        srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return srv.server_address[1]
+
+    def test_first_certificate_is_kept(self):
+        folder = tempfile.mkdtemp(prefix="fanctl-pin-")
+        first, second = self.make_cert(folder, "a"), self.make_cert(folder, "b")
+        port = self.serve(first)
+        rf = drivers.RedfishDriver(f"127.0.0.1:{port}", "root", "pw", False, folder)
+        rf.pin = True
+        self.assertEqual(rf.get("/redfish/v1")["RedfishVersion"], "1.0.0")   # pinned on first use
+        self.assertEqual(rf.get("/redfish/v1")["RedfishVersion"], "1.0.0")
+        rf.host = f"127.0.0.1:{self.serve(second)}"                         # same host, another certificate
+        with self.assertRaises(drivers.DriverError) as cm:
+            rf.get("/redfish/v1")
+        self.assertIn("certificate changed", str(cm.exception))
+        drivers.forget_pin(folder, rf.host)                                  # accepted in the dashboard
+        self.assertEqual(rf.get("/redfish/v1")["RedfishVersion"], "1.0.0")
+
+    def test_scans_and_tests_leave_no_pin(self):
+        folder = tempfile.mkdtemp(prefix="fanctl-pin-")
+        port = self.serve(self.make_cert(folder, "a"))
+        rf = drivers.RedfishDriver(f"127.0.0.1:{port}", "root", "pw", False, folder)
+        rf.get("/redfish/v1")
+        self.assertFalse(os.path.exists(os.path.join(folder, "redfish-pins.json")))
 
 
 class Detection(unittest.TestCase):

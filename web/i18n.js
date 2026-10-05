@@ -142,6 +142,14 @@ const PT = {
   "Profile name": "Nome do perfil", "Start": "Início", "End": "Fim", "Maximum speed": "Velocidade máxima", "Smart target": "Alvo do smart",
   "Remove profile": "Remover perfil", "Monday": "Segunda", "Tuesday": "Terça", "Wednesday": "Quarta", "Thursday": "Quinta",
   "Friday": "Sexta", "Saturday": "Sábado", "Sunday": "Domingo",
+  "Accept the new certificate": "Aceitar o certificado novo", "Sessions": "Sessões", "Sign out everywhere": "Terminar sessão em todo o lado",
+  "Signs out every browser and phone signed in to this dashboard, including any whose cookie was copied. You stay signed in here. Changing a password does the same.":
+    "Termina a sessão em todos os browsers e telemóveis com sessão iniciada neste painel, incluindo qualquer um cujo cookie tenha sido copiado. Aqui continua com sessão iniciada. Mudar uma password faz o mesmo.",
+  "Only accept it if you replaced the BMC's certificate yourself. Otherwise someone may be intercepting the connection to it.":
+    "Aceite só se foi você a substituir o certificado do BMC. Caso contrário, alguém pode estar a intercetar a ligação.",
+  "The new certificate will be remembered from the next reading": "O certificado novo fica guardado a partir da próxima leitura",
+  "Could not accept it": "Não foi possível aceitar", "Sign out every other browser and phone?": "Terminar a sessão em todos os outros browsers e telemóveis?",
+  "Every other session is signed out": "Todas as outras sessões foram terminadas", "Could not sign the others out": "Não foi possível terminar as outras sessões",
   "Not sure? Let the BMC tell you.": "Não tem a certeza? Pergunte ao BMC.", "Detect": "Detetar",
   "Find BMCs on your network.": "Procure BMCs na sua rede.", "Scan network": "Procurar na rede", "Network range to scan": "Gama de rede a procurar",
   "Answers": "Responde a", "Suggested": "Sugestão", "Use": "Usar", "Added": "Adicionado", "Unknown": "Desconhecido",

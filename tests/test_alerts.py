@@ -79,12 +79,15 @@ class Channels(unittest.TestCase):
             "ntfy": {"enabled": True, "url": "https://ntfy.example.com/sub/fans", "token": "tk_1"},
             "gotify": {"enabled": True, "url": "https://gotify.example.com/", "token": "Aabc"},
             "webhook": {"enabled": True, "url": "https://hooks.example.com/x?k=1"}}}, alerts.alert_config())
-        real, alerts.urllib.request.urlopen = alerts.urllib.request.urlopen, fake
+        class Opener:
+            def open(self, req, timeout):
+                return fake(req, timeout)
+        real, alerts.urllib.request.build_opener = alerts.urllib.request.build_opener, lambda *h: Opener()
         try:
             for c in alerts.CHANNELS:
                 alerts.send_channel(cfg, c, "failsafe", alerts.SAMPLE)
         finally:
-            alerts.urllib.request.urlopen = real
+            alerts.urllib.request.build_opener = real
         (nu, nh, nb), (gu, gh, gb), (wu, wh, wb) = sent
         self.assertEqual((nu, nb["topic"], nb["priority"], nh["Authorization"]), ("https://ntfy.example.com/sub/", "fans", 4, "Bearer tk_1"))
         self.assertEqual(nb["title"], "Rack A: failsafe")

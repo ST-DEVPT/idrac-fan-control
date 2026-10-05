@@ -114,6 +114,7 @@ Servers, fan settings and Discord are configured in the dashboard. The environme
 | `EMBED_TOKEN` | empty | A widget token for `/embed?token=` and `/api/widget`. Tokens can also be created on the Homarr page |
 | `UPDATE_CHECK` | `true` | Asks GitHub twice a day for the latest release, and shows it in the sidebar when it is newer. `false` turns it off |
 | `TRUST_PROXY` | off | Set to `true` behind a reverse proxy, so sign-in limits and the event log use `X-Forwarded-For` |
+| `TRUSTED_PROXIES` | loopback and Docker networks | Addresses or networks (comma separated) whose `X-Forwarded-For` is believed, e.g. `192.168.1.10` for a proxy on another machine |
 | `PORT` | `8080` | HTTP port inside the container |
 
 ### Servers in the environment

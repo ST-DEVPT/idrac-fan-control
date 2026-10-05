@@ -5,11 +5,25 @@ import time
 import unittest
 from http.server import ThreadingHTTPServer
 
-from fanctl import config, server, web, widgets
+from fanctl import config, server, sessions, web, widgets
 from fanctl.server import SERVERS
 
 
 class Sessions(unittest.TestCase):
+    def test_sign_out_and_sign_out_everywhere(self):
+        key = web.session_key()
+        a, b = web.make_token(key, 60), web.make_token(key, 60, "viewer")
+        sessions.revoke(key, a)
+        self.assertIsNone(web.valid_token(key, a))             # signed out, even if the cookie was copied
+        self.assertEqual(web.valid_token(key, b), "viewer")    # the others carry on
+        saved = json.loads(json.dumps(sessions._sessions()))
+        try:
+            sessions.revoke_all()
+            self.assertIsNone(web.valid_token(key, b))         # everyone out
+            self.assertEqual(web.valid_token(key, web.make_token(key, 60)), "admin")
+        finally:  # the other tests' sessions belong to the generation before
+            sessions._state.update(saved)
+
     def test_tokens(self):
         key = web.session_key()
         self.assertEqual(web.valid_token(key, web.make_token(key, 60)), "admin")
@@ -232,6 +246,22 @@ class HTTP(Base):
         finally:
             alerts.save_alerts(saved)
 
+    def test_viewers_cannot_read_bmc_accounts(self):
+        st, h, _ = self.req("POST", "/api/login", {"password": "lookonly"})
+        viewer = {"Cookie": h["Set-Cookie"].split(";")[0]}
+        self.assertEqual(self.req("GET", "/api/servers/rack-a", headers=viewer)[0], 403)
+        self.assertEqual(self.get("/api/servers/rack-a")[0], 200)
+
+    def test_diagnostics_hide_the_bmc_address(self):
+        srv = SERVERS["rack-a"]
+        real_host = srv.host
+        srv.host = "10.20.30.40"
+        srv.log("Cannot read the BMC: 10.20.30.40 timed out", "error")
+        try:
+            self.assertNotIn("10.20.30.40", self.get("/api/servers/rack-a/diagnostics")[2].decode())
+        finally:
+            srv.host = real_host
+
     def test_diagnostics(self):
         st, h, data = self.get("/api/servers/rack-a/diagnostics")
         self.assertEqual(st, 200)
@@ -361,30 +391,57 @@ class Roles(Base):
 
     def test_throttling_is_per_address(self):
         now = time.time()
-        web.failures.clear()
-        for _ in range(web.LOGIN_ATTEMPTS):
-            web.failures.setdefault("10.0.0.66", []).append(now)
-        self.assertGreater(web.throttled("10.0.0.66"), 0)
-        self.assertEqual(web.throttled("10.0.0.67"), 0)                  # someone else can still sign in
-        self.assertEqual(web.throttled("10.0.0.66", now + web.LOGIN_WINDOW + 1), 0)
-        web.failures["127.0.0.1"] = [now] * web.LOGIN_ATTEMPTS
+        sessions.failures.clear()
+        for _ in range(sessions.LOGIN_ATTEMPTS):
+            sessions.failures.setdefault("10.0.0.66", []).append(now)
+        self.assertGreater(sessions.throttled("10.0.0.66"), 0)
+        self.assertEqual(sessions.throttled("10.0.0.67"), 0)             # someone else can still sign in
+        self.assertEqual(sessions.throttled("10.0.0.66", now + sessions.LOGIN_WINDOW + 1), 0)
+        sessions.failures["127.0.0.1"] = [now] * sessions.LOGIN_ATTEMPTS
         st, h, _ = self.req("POST", "/api/login", {"password": "hunter2"})
         self.assertEqual(st, 429)
         self.assertIn("Retry-After", h)
-        web.failures.clear()
+        sessions.failures.clear()
+
+    def test_throttling_memory_is_bounded(self):
+        sessions.failures.clear()
+        real, sessions.MAX_TRACKED = sessions.MAX_TRACKED, 50
+        try:
+            for i in range(500):                      # a spoofing client inventing addresses
+                sessions.failed(f"198.51.100.{i % 250}.{i}")
+            self.assertLessEqual(len(sessions.failures), 50)
+        finally:
+            sessions.MAX_TRACKED = real
+            sessions.failures.clear()
 
     def test_forwarded_for_needs_trust_proxy(self):
-        web.failures.clear()
+        sessions.failures.clear()
         self.req("POST", "/api/login", {"password": "nope"}, {"X-Forwarded-For": "203.0.113.9"})
-        self.assertIn("127.0.0.1", web.failures)                         # the header was not believed
-        web.failures.clear()
+        self.assertIn("127.0.0.1", sessions.failures)                    # the header was not believed
+        sessions.failures.clear()
         config.TRUST_PROXY = True
         try:
-            self.req("POST", "/api/login", {"password": "nope"}, {"X-Forwarded-For": "203.0.113.9, 10.0.0.1"})
-            self.assertIn("203.0.113.9", web.failures)
+            # the client wrote the left part; the proxy (127.0.0.1, trusted) appended what it saw
+            self.req("POST", "/api/login", {"password": "nope"}, {"X-Forwarded-For": "1.2.3.4, 203.0.113.9"})
+            self.assertEqual(list(sessions.failures), ["203.0.113.9"])
         finally:
             config.TRUST_PROXY = False
-            web.failures.clear()
+            sessions.failures.clear()
+
+    def test_client_address_rules(self):
+        ca = sessions.client_address
+        config.TRUST_PROXY = True
+        try:
+            self.assertEqual(ca("172.18.0.1", "203.0.113.9"), "203.0.113.9")           # via the proxy
+            self.assertEqual(ca("172.18.0.1", "6.6.6.6, 203.0.113.9"), "203.0.113.9")  # spoofed left part ignored
+            self.assertEqual(ca("192.168.1.50", "6.6.6.6"), "192.168.1.50")            # straight to the app
+            self.assertEqual(ca("127.0.0.1", "10.0.0.7, 172.18.0.3"), "10.0.0.7")     # two proxies
+            config.TRUSTED_PROXIES = "10.9.9.9"
+            self.assertEqual(ca("127.0.0.1", "6.6.6.6"), "127.0.0.1")                 # only the listed proxy
+            self.assertEqual(ca("10.9.9.9", "6.6.6.6"), "6.6.6.6")
+        finally:
+            config.TRUST_PROXY, config.TRUSTED_PROXIES = False, ""
+        self.assertEqual(ca("127.0.0.1", "6.6.6.6"), "127.0.0.1")                     # TRUST_PROXY off
 
 
 class Backup(Base):

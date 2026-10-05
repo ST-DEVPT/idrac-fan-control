@@ -215,7 +215,12 @@ function renderServer() {
 
   const alert = s.error ? ["BMC", s.error] : s.failsafe ? ["Failsafe", `${cap(s.reason)}. The BMC is controlling the fans.`] : null;
   $("#alert").classList.toggle("show", !!alert);
-  if (alert) { $("#alert-title").textContent = alert[0]; $("#alert-msg").textContent = alert[1]; }
+  // written only when it changes: the box is a live region, read out again on every write
+  if (alert && $("#alert-msg").dataset.en !== alert[1]) {
+    $("#alert-title").textContent = alert[0]; $("#alert-msg").textContent = alert[1]; $("#alert-msg").dataset.en = alert[1];
+  }
+  if (!alert) $("#alert-msg").dataset.en = "";
+  $("#accept-cert").hidden = !(s.error && s.error.includes("certificate changed") && overview?.role === "admin");
 
   const cpus = sens.temps.filter(t => t.cpu).sort((a, b) => b.value - a.value);
   const fs = draft.failsafe_temp;
@@ -651,6 +656,12 @@ $("#pref-unit").onchange = e => { PREFS.unit = e.target.value; savePrefs(); loca
 $("#signout").onclick = async () => {
   await api("/api/logout", {});
   location.replace("/login");
+};
+
+$("#accept-cert").onclick = async () => {
+  if (!confirm(translate("Only accept it if you replaced the BMC's certificate yourself. Otherwise someone may be intercepting the connection to it."))) return;
+  const r = await api(`/api/servers/${encodeURIComponent(server.id)}/accept-certificate`, {});
+  toast(r.ok ? "The new certificate will be remembered from the next reading" : "Could not accept it", !r.ok);
 };
 
 addEventListener("resize", () => { if (route.view === "server" && server) renderServer(); });

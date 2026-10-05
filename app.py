@@ -53,6 +53,33 @@ def watchdog():
             os._exit(1)
 
 
+class BoundedServer(ThreadingHTTPServer):
+    """A thread per request, but never more than MAX_REQUESTS at once: a flood of slow or idle
+    connections waits its turn instead of using up threads and memory."""
+    MAX_REQUESTS = 64
+    daemon_threads = True
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.slots = threading.BoundedSemaphore(self.MAX_REQUESTS)
+
+    def process_request(self, request, client_address):
+        if not self.slots.acquire(timeout=10):
+            self.shutdown_request(request)  # busy for 10 s: drop this one rather than queue forever
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.slots.release()
+
+
 def main():
     if not data_dir_writable():
         sys.exit(f"ERROR: cannot write to {config.DATA_DIR.resolve()}. The container runs as uid 1000; "
@@ -71,7 +98,7 @@ def main():
     threading.Thread(target=watchdog, daemon=True, name="watchdog").start()
     threading.Thread(target=updates.loop, daemon=True, name="updates").start()
     print(f"Fan Control {config.VERSION} listening on :{config.PORT} for {len(SERVERS)} server(s)", flush=True)
-    ThreadingHTTPServer(("0.0.0.0", config.PORT), web.Handler).serve_forever()
+    BoundedServer(("0.0.0.0", config.PORT), web.Handler).serve_forever()
 
 
 if __name__ == "__main__":

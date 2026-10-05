@@ -8,6 +8,8 @@ and, if it can control fans, implements set_auto() and set_speed(percent).
 """
 
 import base64
+import hashlib
+import http.client
 import json
 import math
 import os
@@ -372,6 +374,70 @@ class SameOriginRedirect(urllib.request.HTTPRedirectHandler):
     http_error_308 = urllib.request.HTTPRedirectHandler.http_error_302
 
 
+# ---- trust on first use for BMCs with self-signed certificates
+#
+# Without verify_tls, the first certificate a BMC shows is remembered (its SHA-256) and every later
+# connection must show the same one; otherwise the BMC password, sent with every request, could be
+# collected by anyone in the middle. Saving the server in the dashboard forgets the pin, which is how
+# a replaced certificate is accepted.
+
+def _pins_file(data_dir):
+    return os.path.join(data_dir, "redfish-pins.json")
+
+
+def _load_pins(data_dir):
+    try:
+        with open(_pins_file(data_dir), encoding="utf-8") as f:
+            pins = json.load(f)
+        return pins if isinstance(pins, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def forget_pin(data_dir, host):
+    pins = _load_pins(data_dir)
+    if pins.pop(bare_host(host), None) is not None:
+        from .config import write_json
+        write_json(_pins_file(data_dir), pins)
+
+
+class CertificateChanged(Exception):
+    pass
+
+
+class PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, data_dir, host):
+        super().__init__(context=ssl._create_unverified_context())  # self-signed: identity comes from the pin
+        self.data_dir, self.host = data_dir, bare_host(host)
+
+    def check(self, der):
+        fingerprint = hashlib.sha256(der).hexdigest()
+        pins = _load_pins(self.data_dir)
+        known = pins.get(self.host)
+        if known is None:
+            pins[self.host] = fingerprint
+            from .config import write_json
+            write_json(_pins_file(self.data_dir), pins)
+        elif known != fingerprint:
+            raise CertificateChanged(
+                f"the BMC's TLS certificate changed (now {fingerprint[:16]}…, was {known[:16]}…). "
+                "If you replaced it, open the server in the dashboard and save to accept the new one; "
+                "otherwise someone may be intercepting the connection")
+
+    def https_open(self, req):
+        handler = self
+
+        class Connection(http.client.HTTPSConnection):
+            def connect(self):
+                super().connect()
+                try:
+                    handler.check(self.sock.getpeercert(binary_form=True))
+                except CertificateChanged:
+                    self.close()
+                    raise
+        return self.do_open(Connection, req, context=self._context)
+
+
 class RedfishDriver(Driver):
     kind = "redfish"
     label = "HPE iLO 4 / 5 / 6 and other Redfish"
@@ -380,6 +446,7 @@ class RedfishDriver(Driver):
     monitor_reason = "the vendor firmware does not expose fan control"
 
     timeout = 20
+    pin = False  # the control loop turns it on; scans and connection tests don't leave pins behind
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
@@ -387,21 +454,27 @@ class RedfishDriver(Driver):
 
     def get(self, path):
         if self.verify_tls:
-            ctx = ssl.create_default_context()
+            https = urllib.request.HTTPSHandler(context=ssl.create_default_context())
+        elif self.pin:
+            https = PinnedHTTPSHandler(self.data_dir, self.host)
         else:
-            ctx = ssl._create_unverified_context()  # BMCs ship self-signed certificates
+            https = urllib.request.HTTPSHandler(context=ssl._create_unverified_context())  # self-signed
         token = base64.b64encode(f"{self.username}:{self.password}".encode()).decode()
         host = f"[{self.host}]" if self.host.count(":") > 1 and not self.host.startswith("[") else self.host
         req = urllib.request.Request(f"https://{host}{path}", headers={
             "Authorization": f"Basic {token}", "Accept": "application/json", "OData-Version": "4.0"})
-        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx), SameOriginRedirect)
+        opener = urllib.request.build_opener(https, SameOriginRedirect)
         try:
             with opener.open(req, timeout=self.timeout) as r:
                 return json.loads(r.read(5_000_000))
         except urllib.error.HTTPError as e:
             raise DriverError(f"Redfish {path}: HTTP {e.code} {e.reason}"
                               + (" (check the user name and password)" if e.code == 401 else "")) from e
+        except CertificateChanged as e:
+            raise DriverError(str(e)) from e
         except (urllib.error.URLError, OSError, ValueError) as e:
+            if isinstance(getattr(e, "reason", None), CertificateChanged):
+                raise DriverError(str(e.reason)) from e
             raise DriverError(f"Redfish {path}: {getattr(e, 'reason', e)}") from e
 
     def diagnose(self):

@@ -16,63 +16,16 @@ from .alerts import (ALERT_KINDS, CHANNELS, SAMPLE, alert_config, build_payload,
 from .backup import export_config, import_config
 from .config import DATA_DIR, INTERVAL, VERSION, WEB
 from .control import validate_settings
-from .drivers import DRIVERS, DriverError, detect, scan
+from .drivers import DRIVERS, DriverError, detect, forget_pin, scan
 from .metrics import metrics
 from .server import SERVERS, registry_lock, save_dashboard_servers, stalled, start, stop, unique_id, validate_server
 from .widgets import WIDGET_FIELDS, homarr_widget, save_widget_fields, widget_fields, widget_view
 
 KEY = b""  # set by app.main() once the data folder is known to be writable
 
-# ---------------------------------------------------------------- sessions
-
-SESSION_SHORT = 12 * 3600
-SESSION_LONG = 30 * 86400
-LOGIN_WINDOW = 600     # seconds over which failed sign-ins are counted, per address
-LOGIN_ATTEMPTS = 5     # failures allowed in that window before the address has to wait
-failures = {}          # address -> times of recent failed sign-ins
-failures_lock = threading.Lock()
-
-
-def session_key():
-    """Signing key derived from a persisted random secret and the passwords, so changing
-    WEB_PASSWORD or VIEW_PASSWORD (or deleting data/secret) signs everyone out."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    f = DATA_DIR / "secret"
-    if not f.exists():
-        f.write_text(secrets.token_hex(32))
-        f.chmod(0o600)
-    passwords = f"{config.WEB_PASSWORD}\0{config.VIEW_PASSWORD}".encode()
-    return hmac.new(bytes.fromhex(f.read_text().strip()), passwords, hashlib.sha256).digest()
-
-
-def make_token(key, ttl, role="admin"):
-    body = f"{int(time.time()) + ttl}.{role}"
-    return f"{body}.{hmac.new(key, body.encode(), hashlib.sha256).hexdigest()}"
-
-
-def valid_token(key, token):
-    """The role a session token grants ("admin" or "viewer"), or None if it is forged or expired."""
-    body, _, sig = (token or "").rpartition(".")
-    exp, _, role = body.partition(".")
-    good = hmac.new(key, body.encode(), hashlib.sha256).hexdigest()
-    if hmac.compare_digest(sig.encode(), good.encode()) and exp.isdigit() and int(exp) > time.time() \
-            and role in ("admin", "viewer"):
-        return role
-    return None
-
-
-def throttled(address, now=None):
-    """Seconds this address must wait before trying to sign in again, 0 if it may try now."""
-    now = now or time.time()
-    with failures_lock:
-        recent = [t for t in failures.get(address, []) if t > now - LOGIN_WINDOW]
-        failures[address] = recent
-        return int(recent[0] + LOGIN_WINDOW - now) + 1 if len(recent) >= LOGIN_ATTEMPTS else 0
-
-
-def failed(address):
-    with failures_lock:
-        failures.setdefault(address, []).append(time.time())
+# Sessions and sign-in throttling live in sessions.py; the names stay importable from here.
+from .sessions import (SESSION_LONG, SESSION_SHORT, client_address, failed, make_token, revoke,  # noqa: E402,F401
+                       revoke_all, session_key, throttled, valid_token)
 
 
 def same_secret(given, expected):
@@ -109,6 +62,10 @@ def diagnostics(srv):
     with srv.lock:
         state = {k: v for k, v in srv.state.items() if k != "smart_map"}
         events = list(srv.events)[:50]
+    if srv.host:  # "Started: ..., 10.0.0.5, every 15s", "Cannot read the BMC: 10.0.0.5 ..."
+        hide = lambda text: text.replace(srv.host, "<bmc>") if isinstance(text, str) else text  # noqa: E731
+        events = [{**e, "msg": hide(e["msg"])} for e in events]
+        state = {k: hide(v) for k, v in state.items()}
     try:
         raw = srv.driver.diagnose()
     except Exception as e:  # a diagnostics bug must still return what it has
@@ -149,10 +106,8 @@ class Handler(BaseHTTPRequestHandler):
         return widget and (tokens.check(self.query.get("token", [""])[0], "widget") or tokens.check(bearer, "widget"))
 
     def client(self):
-        """The address to account sign-ins and changes to. X-Forwarded-For is only believed with
-        TRUST_PROXY, since anyone can send it."""
-        forwarded = self.headers.get("X-Forwarded-For", "")
-        return forwarded.split(",")[0].strip() if config.TRUST_PROXY and forwarded else self.client_address[0]
+        """The address to account sign-ins and changes to (see sessions.client_address)."""
+        return client_address(self.client_address[0], self.headers.get("X-Forwarded-For", ""))
 
     def who(self):
         return f"{self.role()} at {self.client()}"
@@ -300,6 +255,8 @@ class Handler(BaseHTTPRequestHandler):
             srv = SERVERS.get(path.rsplit("/", 1)[1])
             if srv is None:
                 return self.send(404, {"error": "unknown server"})
+            if self.role() != "admin":  # the BMC account name is half a credential
+                return self.send(403, {"error": "this account can only look"})
             return self.send(200, {**srv.info(), "username": srv.cfg.get("username", ""),
                                    "verify_tls": srv.cfg.get("verify_tls", False),
                                    "has_password": bool(srv.cfg.get("password"))})
@@ -368,6 +325,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, {"ok": True, "role": role}, headers=[
                 self.set_session(make_token(KEY, ttl, role), ttl if body.get("remember") else None)])
         if self.route == "/api/logout":
+            revoke(KEY, self.cookie("session"))  # this session ends for good, even if its cookie was copied
             return self.send(200, {"ok": True}, headers=[self.set_session("", 0)])
 
         if not self.authed():
@@ -447,10 +405,20 @@ class Handler(BaseHTTPRequestHandler):
                 except (ValueError, TypeError) as e:
                     return self.send(400, {"error": str(e)})
                 cfg["id"] = unique_id(cfg["name"], SERVERS)
+                forget_pin(str(DATA_DIR), cfg["host"])  # a new server: whatever certificate it shows first
                 srv = start(cfg)
                 save_dashboard_servers()
                 srv.log(f"Added by {self.who()}")
             return self.send(201, srv.info())
+        m = re.fullmatch(r"/api/servers/([a-z0-9-]+)/accept-certificate", self.route)
+        if m:  # the BMC's certificate was replaced on purpose: remember the new one from the next reading
+            srv = SERVERS.get(m.group(1))
+            if srv is None:
+                return self.send(404, {"error": "unknown server"})
+            forget_pin(str(DATA_DIR), srv.host)
+            srv.log(f"New TLS certificate of the BMC accepted by {self.who()}", "warn")
+            srv.wake.set()
+            return self.send(200, {"ok": True})
         m = re.fullmatch(r"/api/servers/([a-z0-9-]+)(/delete)?", self.route)
         if m:
             with registry_lock:
@@ -461,6 +429,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(409, {"error": "this server is defined in the environment; change it there"})
                 if m.group(2):
                     stop(srv, forget=True)
+                    forget_pin(str(DATA_DIR), srv.host)
                     save_dashboard_servers()
                     print(time.strftime("%H:%M:%S"), f"INFO {srv.name} removed by {self.who()}", flush=True)
                     return self.send(200, {"ok": True})
@@ -469,10 +438,16 @@ class Handler(BaseHTTPRequestHandler):
                 except (ValueError, TypeError) as e:
                     return self.send(400, {"error": str(e)})
                 stop(srv)  # restart with the new address, credentials or driver
+                forget_pin(str(DATA_DIR), cfg["host"])  # saving accepts the certificate the BMC shows now
                 srv = start(cfg)
                 save_dashboard_servers()
                 srv.log(f"Connection settings changed by {self.who()}")
             return self.send(200, srv.info())
+        if self.route == "/api/sessions/revoke-all":
+            revoke_all()
+            print(time.strftime("%H:%M:%S"), f"INFO every session signed out by {self.who()}", flush=True)
+            ttl = SESSION_SHORT  # the admin who asked stays signed in, with a fresh session
+            return self.send(200, {"ok": True}, headers=[self.set_session(make_token(KEY, ttl, "admin"), None)])
         if self.route == "/api/tokens":
             try:
                 token, row = tokens.create(body.get("name"), body.get("kind"))
