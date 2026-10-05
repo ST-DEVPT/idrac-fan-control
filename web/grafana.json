@@ -501,7 +501,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "expr": "fanctl_cpu_temperature_celsius{server=~\"$server\"}",
-          "legendFormat": "CPU \u00b7 {{name}}",
+          "legendFormat": "CPU · {{name}}",
           "refId": "A"
         },
         {
@@ -510,7 +510,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "expr": "fanctl_exhaust_temperature_celsius{server=~\"$server\"}",
-          "legendFormat": "Exhaust \u00b7 {{name}}",
+          "legendFormat": "Exhaust · {{name}}",
           "refId": "B"
         },
         {
@@ -519,7 +519,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "expr": "fanctl_inlet_temperature_celsius{server=~\"$server\"}",
-          "legendFormat": "Inlet \u00b7 {{name}}",
+          "legendFormat": "Inlet · {{name}}",
           "refId": "C"
         }
       ],
@@ -574,7 +574,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "expr": "fanctl_fan_speed_percent{server=~\"$server\"}",
-          "legendFormat": "Set \u00b7 {{name}}",
+          "legendFormat": "Set · {{name}}",
           "refId": "A"
         }
       ],
@@ -611,7 +611,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Set \u00b7 {{name}}"
+              "options": "Set · {{name}}"
             },
             "properties": [
               {
@@ -647,7 +647,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "expr": "fanctl_fan_rpm{server=~\"$server\"}",
-          "legendFormat": "{{fan}} \u00b7 {{name}}",
+          "legendFormat": "{{fan}} · {{name}}",
           "refId": "A"
         }
       ],
@@ -757,7 +757,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "expr": "fanctl_bmc_control{server=~\"$server\"}",
-          "legendFormat": "Dell automatic \u00b7 {{name}}",
+          "legendFormat": "Dell automatic · {{name}}",
           "refId": "A"
         },
         {
@@ -766,7 +766,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "expr": "fanctl_failsafe_active{server=~\"$server\"}",
-          "legendFormat": "Failsafe \u00b7 {{name}}",
+          "legendFormat": "Failsafe · {{name}}",
           "refId": "B"
         }
       ],
@@ -801,6 +801,155 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Smart mode: temperature",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fanctl_cpu_temperature_celsius{server=~\"$server\"}",
+          "legendFormat": "CPU · {{name}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fanctl_smart_predicted_celsius{server=~\"$server\"}",
+          "legendFormat": "Heading for · {{name}} {{sensor}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fanctl_smart_target_celsius{server=~\"$server\"}",
+          "legendFormat": "Target · {{name}} {{sensor}}",
+          "refId": "C"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": false,
+            "lineInterpolation": "smooth"
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "description": "Only while smart mode is in control."
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Smart mode: why this speed",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fanctl_fan_speed_percent{server=~\"$server\"} and on(server) fanctl_smart_map_points{server=~\"$server\"}",
+          "legendFormat": "Set · {{name}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fanctl_smart_learned_speed_percent{server=~\"$server\"}",
+          "legendFormat": "Learned for this load · {{name}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "fanctl_smart_trim_percent{server=~\"$server\"}",
+          "legendFormat": "Correction · {{name}}",
+          "refId": "C"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": false,
+            "lineInterpolation": "smooth"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "max": 100
+        },
+        "overrides": []
+      },
+      "description": "Only while smart mode is in control."
     }
   ]
 }

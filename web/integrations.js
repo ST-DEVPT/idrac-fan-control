@@ -16,6 +16,11 @@ const METRICS = [
   ["fanctl_bmc_control", "1 while the BMC's own fan control is active"],
   ["fanctl_failsafe_active", "1 while the failsafe holds"],
   ["fanctl_last_update_timestamp_seconds", "Time of the last reading"],
+  ["fanctl_smart_target_celsius", "Smart mode: target of the sensor it follows (+ sensor)"],
+  ["fanctl_smart_predicted_celsius", "Smart mode: where that temperature is heading (+ sensor)"],
+  ["fanctl_smart_learned_speed_percent", "Smart mode: speed learned for the current load"],
+  ["fanctl_smart_trim_percent", "Smart mode: correction on top of the learned speed"],
+  ["fanctl_smart_boost", "Smart mode: 1 while boosting ahead of a trip point"],
 ];
 
 async function loadIntegrations() {

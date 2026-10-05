@@ -110,6 +110,17 @@ def metrics(servers):
         add("fanctl_inlet_temperature_celsius", "Inlet air temperature.", lbl, sens.get("inlet"))
         add("fanctl_exhaust_temperature_celsius", "Exhaust air temperature.", lbl, sens.get("exhaust"))
         add("fanctl_power_watts", "System power draw.", lbl, sens.get("watts"))
+        sm = st.get("smart")
+        if sm and "sensor" in sm:  # smart mode in control: what it sees and why it chose that speed
+            add("fanctl_smart_target_celsius", "Temperature smart mode aims at, for the sensor it follows.",
+                {**lbl, "sensor": sm["sensor"]}, sm["target"])
+            add("fanctl_smart_predicted_celsius", "Where that temperature is heading, 40 s on.",
+                {**lbl, "sensor": sm["sensor"]}, sm["predicted"])
+            add("fanctl_smart_trend_celsius_per_minute", "Trend of that temperature.", lbl, sm["trend"])
+            add("fanctl_smart_learned_speed_percent", "Speed the learned map gives for the current load.", lbl, sm["learned"])
+            add("fanctl_smart_trim_percent", "Correction on top of the learned map.", lbl, sm["trim"])
+            add("fanctl_smart_boost", "1 while smart mode boosts the fans ahead of a trip point.", lbl, int(sm["boost"]))
+            add("fanctl_smart_map_points", "Load levels smart mode has learned.", lbl, sm["points"])
         for t in sens.get("temps", []):
             add("fanctl_temperature_celsius", "Temperature sensor reading.",
                 {**lbl, "sensor": t["name"], "entity": t["entity"]}, t["value"])
