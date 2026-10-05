@@ -11,8 +11,8 @@ from collections import deque
 
 from .alerts import alert_config, notify
 from .config import DATA_DIR, HISTORY_SECONDS, INTERVAL, LONG_BUCKET, LONG_SECONDS, SAVE_EVERY, STALL_SECONDS, write_json
-from .control import (DEFAULT_SETTINGS, aggregate, curve_speed, decide, learned_curve, quiet_cap, ramped, smart_step,
-                      speed_text, validate_learned)
+from .control import (DEFAULT_SETTINGS, aggregate, curve_speed, decide, failed_fans, learned_curve, quiet_cap, ramped,
+                      smart_step, speed_text, validate_learned)
 from .drivers import DRIVERS, HOST_RE, DemoDriver, DriverError, RedfishDriver
 
 # ---------------------------------------------------------------- one server
@@ -40,6 +40,14 @@ class Server:
         self.learned_saved = dict(self.learned)
         self.logged = None     # last speed written to the event log
         self.hot = False       # above the "running hot" alert threshold
+        self.inlet_hot = False
+        self.failsafe_since = None  # start of the current failsafe, for the "failsafe for N min" alert
+        self.failsafe_told = False
+        self.fan_strikes = {}  # fan name -> readings in a row it looked failed
+        self.fans_failed = set()
+        self.last_manual = None  # (speed, rpm) of the previous cycle, for the command check
+        self.probe = None        # a speed change whose effect on the RPM is being checked
+        self.ignored = False     # the BMC did not follow the last checked change
         self.saved = time.time()
         self.pcie_applied = None
         self.dry_released = False
@@ -245,12 +253,31 @@ class Server:
             if was_failsafe and not failsafe:
                 self.log(f"Failsafe cleared at CPU {cpu:.0f}°C" if cpu is not None else "Failsafe cleared")
                 notify(self, "failsafe_cleared", **vals)
-            threshold = alert_config()["hot_threshold"]
+            cfg = alert_config()
+            threshold = cfg["hot_threshold"]
             if cpu is not None and cpu >= threshold and not self.hot:
                 self.hot = True
                 notify(self, "hot", **vals)
             elif cpu is None or cpu < threshold - 3:
                 self.hot = False
+            inlet = sensors["inlet"]
+            if inlet is not None and inlet >= cfg["inlet_threshold"] and not self.inlet_hot:
+                self.inlet_hot = True
+                self.log(f"Inlet air at {inlet:.0f}°C: the room is running hot", "warn")
+                notify(self, "inlet_hot", **vals, inlet=f"{inlet:.0f}")
+            elif inlet is None or inlet < cfg["inlet_threshold"] - 2:
+                self.inlet_hot = False
+            if failsafe:
+                self.failsafe_since = self.failsafe_since or time.time()
+                minutes = (time.time() - self.failsafe_since) / 60
+                if minutes >= cfg["failsafe_minutes"] and not self.failsafe_told:
+                    self.failsafe_told = True
+                    self.log(f"Failsafe for {minutes:.0f} min", "error")
+                    notify(self, "failsafe_long", **vals, minutes=f"{minutes:.0f}")
+            else:
+                self.failsafe_since, self.failsafe_told = None, False
+            self.check_fans(sensors["fans"], vals)
+            self.check_response(effective if not dry else "dry", speed, sensors["fans"], vals)
             self.state.update(sensors=sensors, cpu_temp=cpu, effective=effective, applied_speed=speed,
                               target_speed=target, reason=reason, failsafe=failsafe, error=error,
                               updated=time.time(), power=power, dry_run=dry, smart=smart,
@@ -262,6 +289,48 @@ class Server:
                                  "rpm": round(sum(rpms) / len(rpms)) if rpms else None,
                                  "fanpct": round(sum(pcts) / len(pcts)) if pcts else None,
                                  "watts": sensors["watts"]})
+
+    def check_fans(self, fans, vals):
+        """A fan that stops while the others spin. Two readings in a row, so one odd value is ignored.
+        Called with self.lock held."""
+        now_failed = set(failed_fans(fans))
+        self.fan_strikes = {n: self.fan_strikes.get(n, 0) + 1 for n in now_failed}
+        for f in fans:
+            if self.fan_strikes.get(f["name"], 0) >= 2 and f["name"] not in self.fans_failed:
+                self.fans_failed.add(f["name"])
+                reading = f"{f['rpm']} rpm" if f["rpm"] is not None else f"{f['pct']}%" if f["pct"] is not None else "a fault"
+                self.log(f"Fan {f['name']} failed: {reading}", "error")
+                notify(self, "fan_failed", **vals, fan=f["name"], rpm=reading)
+        for name in self.fans_failed - now_failed:
+            self.fans_failed.discard(name)
+            self.log(f"Fan {name} is spinning again")
+
+    def check_response(self, effective, speed, fans, vals):
+        """A BMC that accepts fan commands but ignores them (after a reset, or firmware that locks its
+        fans) leaves the server on a speed nobody chose. After the speed moves by 20 points or more,
+        the average RPM has to move the same way by 10 % within 30 s. Called with self.lock held."""
+        rpms = [f["rpm"] for f in fans if f["rpm"]]
+        rpm = sum(rpms) / len(rpms) if rpms else None
+        if effective != "manual" or speed is None or rpm is None:
+            self.last_manual = self.probe = None
+            return
+        now = time.time()
+        if self.last_manual and abs(speed - self.last_manual[0]) >= 20:
+            self.probe = {"t": now, "to": speed, "dir": 1 if speed > self.last_manual[0] else -1, "rpm": self.last_manual[1]}
+        elif self.probe and abs(speed - self.probe["to"]) > 10:
+            self.probe = None  # the speed moved on before the check was due
+        self.last_manual = (speed, rpm)
+        if not self.probe or now - self.probe["t"] < 30:
+            return
+        followed = (rpm - self.probe["rpm"]) / self.probe["rpm"] * self.probe["dir"] >= 0.10
+        self.probe = None
+        if not followed and not self.ignored:
+            self.ignored = True
+            self.log(f"The BMC did not follow the fans to {speed}%: their RPM stayed near {rpm:.0f}", "error")
+            notify(self, "ignored", **vals)
+        elif followed and self.ignored:
+            self.ignored = False
+            self.log("The BMC follows fan commands again")
 
     def record(self, point):
         """Add a reading to the 3-hour history and, every 5 minutes, an average to the 7-day one.

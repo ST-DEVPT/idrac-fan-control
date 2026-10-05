@@ -92,6 +92,34 @@ class SmartMemory(unittest.TestCase):
         srv.settings_file.unlink()
 
 
+class Checks(unittest.TestCase):
+    def test_failed_fans(self):
+        from fanctl.control import failed_fans
+        spin = lambda n, rpm: {"name": n, "rpm": rpm, "pct": None, "ok": True}  # noqa: E731
+        self.assertEqual(failed_fans([spin("A", 4000), spin("B", 0), spin("C", 4100)]), ["B"])
+        self.assertEqual(failed_fans([spin("A", 200), spin("B", 250)]), [])        # all slow: a quiet server
+        self.assertEqual(failed_fans([{"name": "P", "rpm": None, "pct": 0, "ok": True},
+                                      {"name": "Q", "rpm": None, "pct": 30, "ok": True}]), ["P"])
+        self.assertEqual(failed_fans([dict(spin("A", 4000), ok=False)]), ["A"])
+
+    def test_ignored_commands_are_noticed(self):
+        import time as t
+        srv = Recorder("ignored")
+        fans = lambda rpm: [{"name": "F", "rpm": rpm, "pct": None, "ok": True}]  # noqa: E731
+        with srv.lock:
+            srv.check_response("manual", 20, fans(4000), {})
+            srv.check_response("manual", 60, fans(4000), {})   # raised by 40 points
+            srv.probe["t"] -= 31
+            srv.check_response("manual", 60, fans(4050), {})   # 30 s later the RPM has not moved
+        self.assertTrue(srv.ignored)
+        self.assertIn("did not follow", srv.events[0]["msg"])
+        with srv.lock:
+            srv.check_response("manual", 30, fans(4050), {})
+            srv.probe["t"] = t.time() - 31
+            srv.check_response("manual", 30, fans(2500), {})   # this time it followed
+        self.assertFalse(srv.ignored)
+
+
 class Recorder(Server):
     """A demo server whose fan commands are recorded."""
     def __init__(self, sid):

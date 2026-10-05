@@ -250,6 +250,10 @@ save. Text that comes from a BMC can never ping anyone.
 | Fan command refused | error | The BMC rejects a fan command |
 | Back to normal | resolved | The BMC answers and accepts commands again |
 | Controller error | error | The control loop hits an unexpected error |
+| Failsafe lasting | error | The BMC has held the fans for longer than the set time (10 min by default) |
+| Fan failed | error | A fan stops while the others spin, or the BMC reports it failed (two readings in a row) |
+| Fan commands ignored | error | The speed moved by 20 points or more, and 30 s later the RPM had not followed |
+| Room running hot | warning | The inlet air passes its warning temperature (35 °C by default) |
 | Settings changed | info | Someone applies new settings (off by default) |
 | Controller started | info | The container starts (off by default) |
 | Status report | info | On a schedule (off by default) |

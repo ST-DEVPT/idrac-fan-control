@@ -5,7 +5,8 @@ let newWebhook;  // undefined: keep the stored one; "": remove it; otherwise the
 const KIND_NAMES = {
   failsafe: "Failsafe reached", failsafe_cleared: "Failsafe cleared", hot: "Running hot",
   unreachable: "BMC unreachable", refused: "Fan command refused", recovered: "Back to normal",
-  controller_error: "Controller error", settings_changed: "Settings changed", started: "Controller started",
+  controller_error: "Controller error", failsafe_long: "Failsafe lasting", fan_failed: "Fan failed",
+  ignored: "Fan commands ignored", inlet_hot: "Room running hot", settings_changed: "Settings changed", started: "Controller started",
   report: "Status report",
 };
 const LEVEL_NAMES = { error: "Error", warn: "Warning", ok: "Resolved", info: "Info" };
@@ -13,7 +14,7 @@ const SAMPLE = {
   server: "Rack A", host: "192.168.1.120", model: "PowerEdge R730", cpu: "71", speed: "45%", mode: "curve",
   reason: "curve at 71°C", error: "Unable to establish IPMI v2 / RMCP+ session", failsafe: "75",
   interval: "15", time: "12:00:00", period: "1 h", cpu_min: "48", cpu_avg: "55", cpu_max: "71",
-  speed_avg: "24%", power_avg: "152", dell_pct: "0",
+  speed_avg: "24%", power_avg: "152", dell_pct: "0", inlet: "36", inlet_threshold: "35", minutes: "10", fan: "Fan3", rpm: "0 rpm",
 };
 const fillIn = (tpl, v) => tpl.replace(/\{(\w+)\}/g, (m, k) => k in v ? String(v[k]) : m);
 
@@ -29,7 +30,7 @@ async function loadAlerts() {
 
 function body() {
   const keys = ["enabled", "username", "avatar_url", "footer", "details", "mention", "mention_levels",
-                "cooldown_minutes", "hot_threshold", "report_minutes", "report_mode", "colors", "events"];
+                "cooldown_minutes", "hot_threshold", "inlet_threshold", "failsafe_minutes", "report_minutes", "report_mode", "colors", "events"];
   const b = Object.fromEntries(keys.map(k => [k, aDraft[k]]));
   if (newWebhook !== undefined) b.webhook_url = newWebhook;
   return b;
@@ -65,6 +66,8 @@ function renderAlerts() {
   $("#al-mention-id").disabled = !["role", "user"].includes(mKind);
   setIfIdle("#al-cooldown", d.cooldown_minutes);
   setIfIdle("#al-hot", Math.round(tv(d.hot_threshold)));
+  setIfIdle("#al-inlet", Math.round(tv(d.inlet_threshold)));
+  setIfIdle("#al-fs-min", d.failsafe_minutes);
   $$(".al-tu").forEach(el => el.textContent = tu());
 
   $("#al-colors").innerHTML = Object.keys(LEVEL_NAMES).map(l =>
@@ -95,7 +98,7 @@ function renderAlerts() {
 
 function renderPreview() {
   const d = aDraft, lvl = alerts.kinds[aKind], ev = d.events[aKind];
-  const v = { ...SAMPLE, threshold: d.hot_threshold, period: d.report_minutes % 60 ? `${d.report_minutes} min` : `${d.report_minutes / 60} h` };
+  const v = { ...SAMPLE, threshold: d.hot_threshold, inlet_threshold: d.inlet_threshold, minutes: d.failsafe_minutes, period: d.report_minutes % 60 ? `${d.report_minutes} min` : `${d.report_minutes / 60} h` };
   if (aKind === "report") return renderReportPreview(d, v);
   const [mKind, mId] = d.mention.split(":");
   const mention = d.mention && d.mention_levels.includes(lvl)
@@ -151,6 +154,8 @@ $("#al-cooldown").addEventListener("input", e => { const n = +e.target.value; if
 $("#al-report-min").addEventListener("input", e => { const n = +e.target.value; if (Number.isInteger(n) && n >= 5 && n <= 1440) { aDraft.report_minutes = n; aTouch(); } });
 $("#al-report-mode").onchange = e => { aDraft.report_mode = e.target.value; aTouch(); };
 $("#al-hot").addEventListener("input", e => { const n = fromT(+e.target.value); if (n >= 30 && n <= 100) { aDraft.hot_threshold = n; aTouch(); } });
+$("#al-inlet").addEventListener("input", e => { const n = fromT(+e.target.value); if (n >= 15 && n <= 60) { aDraft.inlet_threshold = n; aTouch(); } });
+$("#al-fs-min").addEventListener("input", e => { const n = +e.target.value; if (Number.isInteger(n) && n >= 1 && n <= 1440) { aDraft.failsafe_minutes = n; aTouch(); } });
 $("#al-enabled").onchange = e => { aDraft.enabled = e.target.checked; aTouch(); };
 $("#al-details").onchange = e => { aDraft.details = e.target.checked; aTouch(); };
 $("#al-webhook").addEventListener("input", e => { const v = e.target.value.trim(); newWebhook = v || undefined; aTouch(); });

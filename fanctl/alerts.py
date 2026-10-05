@@ -28,15 +28,21 @@ ALERT_KINDS = {
     "refused":          ("error", "{server}: fan command refused", "{error}\nThe BMC keeps control of the fans."),
     "recovered":        ("ok",    "{server}: back to normal",      "The BMC is answering and accepting fan commands again."),
     "controller_error": ("error", "{server}: controller error",    "{error}\nFans handed back to the BMC."),
+    "failsafe_long":    ("error", "{server}: failsafe for {minutes} min", "The BMC has held the fans for {minutes} minutes and the CPU is at {cpu}°C. Something keeps it hot."),
+    "fan_failed":       ("error", "{server}: fan {fan} failed",    "{fan} reads {rpm} while the other fans spin. Check it before the next hot day."),
+    "ignored":          ("error", "{server}: fan commands ignored", "Fans were set to {speed} but their RPM did not follow. The BMC may have reset or locked its fans."),
+    "inlet_hot":        ("warn",  "{server}: room running hot",    "Inlet air at {inlet}°C, above {inlet_threshold}°C. No fan speed cools the room."),
     "settings_changed": ("info",  "{server}: settings changed",    "Mode {mode}, failsafe {failsafe}°C."),
     "started":          ("info",  "{server}: controller started",  "Watching {host} every {interval} s."),
     "report":           ("info",  "{server}: status",              "{model} · last {period}"),
 }
 REPORT_PLACEHOLDERS = ("period", "cpu_min", "cpu_avg", "cpu_max", "speed_avg", "power_avg", "dell_pct")
-PLACEHOLDERS = ("server", "host", "model", "cpu", "speed", "mode", "reason", "error", "failsafe", "threshold", "interval", "time")
+PLACEHOLDERS = ("server", "host", "model", "cpu", "speed", "mode", "reason", "error", "failsafe", "threshold", "interval", "time",
+                "inlet", "inlet_threshold", "minutes", "fan", "rpm")
 SAMPLE = {"server": "Rack A", "host": "192.168.1.120", "model": "PowerEdge R730", "cpu": "71", "speed": "45%",
           "mode": "curve", "reason": "curve at 71°C", "error": "Unable to establish IPMI v2 / RMCP+ session",
           "failsafe": "75", "threshold": "68", "interval": "15", "time": "12:00:00",
+          "inlet": "36", "inlet_threshold": "35", "minutes": "10", "fan": "Fan3", "rpm": "0 rpm",
           "period": "1 h", "cpu_min": "48", "cpu_avg": "55", "cpu_max": "71", "speed_avg": "24%",
           "power_avg": "152", "dell_pct": "0"}
 
@@ -51,6 +57,8 @@ ALERT_DEFAULTS = {
     "mention_levels": ["error"],
     "cooldown_minutes": 0,   # minimum gap between two alerts of the same kind for the same server
     "hot_threshold": 68,
+    "inlet_threshold": 35,   # "room running hot" at this inlet air temperature
+    "failsafe_minutes": 10,  # "failsafe for N min" once the BMC has held the fans this long
     "report_minutes": 60,    # status report period
     "report_mode": "edit",   # "edit": keep one message up to date; "post": a new message each time
     "colors": {"error": "#c0301c", "warn": "#e4501b", "ok": "#3b7a39", "info": "#4f4d48"},
@@ -145,6 +153,16 @@ def validate_alerts(new, current):
         if not (type(v) in (int, float) and 30 <= v <= 100):
             raise ValueError("temperature warning must be between 30 and 100 °C")
         cfg["hot_threshold"] = v
+    if "inlet_threshold" in new:
+        v = new["inlet_threshold"]
+        if not (type(v) in (int, float) and 15 <= v <= 60):
+            raise ValueError("inlet warning must be between 15 and 60 °C")
+        cfg["inlet_threshold"] = v
+    if "failsafe_minutes" in new:
+        v = new["failsafe_minutes"]
+        if not (type(v) is int and 1 <= v <= 1440):
+            raise ValueError("failsafe alert delay must be a whole number of minutes from 1 to 1440")
+        cfg["failsafe_minutes"] = v
     for level, color in (new.get("colors") or {}).items():
         if level not in LEVELS or not re.fullmatch(r"#[0-9a-fA-F]{6}", str(color)):
             raise ValueError("colors must be #rrggbb for error, warn, ok and info")
@@ -354,7 +372,8 @@ def notify(server, kind, **values):
             "speed": speed_text(st["effective"], st["applied_speed"]),
             "mode": s["mode"], "reason": st["reason"], "error": st["error"] or "",
             "failsafe": s["failsafe_temp"], "threshold": cfg["hot_threshold"], "interval": INTERVAL,
-            "time": time.strftime("%H:%M:%S")}
+            "time": time.strftime("%H:%M:%S"), "inlet_threshold": cfg["inlet_threshold"],
+            "inlet": "—" if (st["sensors"] or {}).get("inlet") is None else f"{st['sensors']['inlet']:.0f}"}
     payload = build_payload(cfg, kind, {**base, **values})
 
     def send():

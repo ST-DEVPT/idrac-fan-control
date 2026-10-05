@@ -80,6 +80,15 @@ def decide(settings, cpu_temp, was_failsafe=False, sensors=None):
     return "manual", max(curve_speed(settings["curve"], cpu_temp), floor), f"curve at {cpu_temp:.0f}°C", False
 
 
+def failed_fans(fans):
+    """Fans that stopped while the others spin, or that the BMC itself reports as failed."""
+    rpms = [f["rpm"] for f in fans if f["rpm"]]
+    pcts = [f["pct"] for f in fans if f["pct"]]
+    return [f["name"] for f in fans if f.get("ok", True) is False
+            or (f["rpm"] is not None and f["rpm"] < 300 and rpms and max(rpms) > 1500)
+            or (f["pct"] is not None and f["pct"] == 0 and pcts and max(pcts) >= 10)]
+
+
 def quiet_cap(quiet, now):
     """The speed cap in force at `now` (a time.struct_time), or None outside quiet hours."""
     if not quiet.get("enabled"):
