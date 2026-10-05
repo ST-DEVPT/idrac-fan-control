@@ -10,7 +10,7 @@ import urllib.request
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-from .config import DATA_DIR, DISCORD_WEBHOOK, INTERVAL, VERSION, write_json
+from .config import DATA_DIR, DISCORD_WEBHOOK, INTERVAL, VERSION, read_json, write_json
 from .control import speed_text
 
 # ---------------------------------------------------------------- alerts
@@ -74,9 +74,8 @@ last_alert = {}  # (server id, kind) -> time, for the cooldown
 
 
 def alert_config():
-    try:
-        saved = json.loads(ALERTS_FILE.read_text())
-    except (OSError, ValueError):
+    saved = read_json(ALERTS_FILE, {}, "alerts.json")
+    if not isinstance(saved, dict):
         saved = {}
     cfg = {**ALERT_DEFAULTS, **{k: v for k, v in saved.items() if k in ALERT_DEFAULTS}}
     cfg["colors"] = {**ALERT_DEFAULTS["colors"], **saved.get("colors", {})}
@@ -222,11 +221,7 @@ def validate_alerts(new, current):
 
 
 def save_alerts(cfg):
-    write_json(ALERTS_FILE, cfg)
-    try:
-        ALERTS_FILE.chmod(0o600)  # holds the webhook token
-    except OSError:
-        pass
+    write_json(ALERTS_FILE, cfg, private=True)  # holds the webhook and channel tokens
 
 
 def fill(template, values):

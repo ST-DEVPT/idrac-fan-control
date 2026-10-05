@@ -4,13 +4,12 @@ itself is shown once, when it is created. EMBED_TOKEN and METRICS_TOKEN still wo
 
 import hashlib
 import hmac
-import json
 import secrets
 import threading
 import time
 
 from . import config
-from .config import DATA_DIR, write_json
+from .config import DATA_DIR, read_json, write_json
 
 TOKENS_FILE = DATA_DIR / "tokens.json"
 KINDS = ("widget", "metrics")
@@ -25,20 +24,14 @@ def _digest(token):
 def _load():
     global _cache
     if _cache is None:
-        try:
-            rows = json.loads(TOKENS_FILE.read_text())
-            _cache = [r for r in rows if isinstance(r, dict) and r.get("kind") in KINDS and len(r.get("hash", "")) == 64]
-        except (OSError, ValueError):
-            _cache = []
+        rows = read_json(TOKENS_FILE, [], "tokens.json")
+        _cache = [r for r in rows if isinstance(r, dict) and r.get("kind") in KINDS
+                  and len(str(r.get("hash", ""))) == 64] if isinstance(rows, list) else []
     return _cache
 
 
 def _save():
-    write_json(TOKENS_FILE, _cache)
-    try:
-        TOKENS_FILE.chmod(0o600)
-    except OSError:
-        pass
+    write_json(TOKENS_FILE, _cache, private=True)
 
 
 def env_token(kind):

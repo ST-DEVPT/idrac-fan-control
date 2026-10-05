@@ -244,8 +244,9 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return self.send(400, {"error": "seconds must be a number"})
             since = time.time() - seconds
-            with srv.lock:
-                return self.send(200, {"points": [p for p in srv.long if p["t"] >= since], "bucket": 300})
+            with srv.lock:  # copy under the lock, send after: a slow client must never hold up the fans
+                points = [p for p in srv.long if p["t"] >= since]
+            return self.send(200, {"points": points, "bucket": 300})
         if path == "/api/widget":
             if not self.authed(widget=True):
                 return self.send(401, {"error": "sign in, or send EMBED_TOKEN as a Bearer token or ?token="})
@@ -262,10 +263,11 @@ class Handler(BaseHTTPRequestHandler):
             srv = self.server_arg()
             if srv is None:
                 return self.send(404, {"error": "unknown server"})
-            with srv.lock:
-                return self.send(200, {**srv.state, **srv.info(), "interval": INTERVAL, "auth": bool(config.WEB_PASSWORD),
-                                       "version": VERSION, "settings": srv.settings(),
-                                       "history": list(srv.history), "events": list(srv.events)})
+            settings = srv.settings()
+            with srv.lock:  # copy under the lock, send after: a slow client must never hold up the fans
+                body = {**srv.state, **srv.info(), "interval": INTERVAL, "auth": bool(config.WEB_PASSWORD),
+                        "version": VERSION, "settings": settings, "history": list(srv.history), "events": list(srv.events)}
+            return self.send(200, body)
         if not self.authed():
             return self.redirect("/login") if path == "/" else self.send(401, {"error": "sign in required"})
         if path == "/":
@@ -332,8 +334,11 @@ class Handler(BaseHTTPRequestHandler):
         hosts = {self.headers.get("Host"), self.headers.get("X-Forwarded-Host")}
         if origin and urlsplit(origin).netloc not in hosts:
             return self.send(403, {"error": "cross-origin request refused"})
-        length = int(self.headers.get("Content-Length") or 0)
-        if length > (1_000_000 if self.route == "/api/import" else 10000):  # backups can be large
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return self.send(400, {"error": "bad Content-Length"})
+        if not 0 <= length <= (1_000_000 if self.route == "/api/import" else 10000):  # backups can be large
             return self.send(413, {"error": "request too large"})
         try:
             body = json.loads(self.rfile.read(length) or b"{}")

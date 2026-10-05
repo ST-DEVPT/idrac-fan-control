@@ -207,13 +207,20 @@ edge. Fans never run below the **minimum speed** in manual modes.
 every fan goes back to its BMC and the process exits, so Docker's restart policy (`restart:
 unless-stopped`) starts a fresh one. The image's health check reads `/livez`, which follows the control
 loops and not the BMCs. What no process can cover is its own sudden death (`kill -9`, out of memory,
-Docker gone): a Dell iDRAC then keeps the last manual speed. For that, run
-[`scripts/fan-guard.sh`](scripts/fan-guard.sh) from the host's cron every minute. When the container is
-not running healthy for two minutes in a row, it hands the fans back to the iDRAC with `ipmitool`:
+Docker gone): the BMC then keeps the last manual speed. For that, run
+[`scripts/fan-guard.sh`](scripts/fan-guard.sh) from root's cron every minute. It finds the Fan Control
+container by its image, and when it has not been running healthy for two minutes in a row (or Docker
+itself is down) it hands the fans back to the BMC: Dell and Supermicro with `ipmitool`, HPE iLO 4
+unlocked over SSH. A container that was removed on purpose is left alone.
 
 ```bash
 * * * * * /root/docker/fan-guard.sh >> /var/log/fan-guard.log 2>&1
 ```
+
+It reads the servers from the `.env` next to it (`chmod 600`; it refuses one others can write):
+`GUARD_SERVERS="R420 X11"`, then `R420_HOST`, `R420_USERNAME`, `R420_PASSWORD` and `R420_DRIVER`
+(`dell`, `supermicro` or `ilo4-unlocked`) for each. A single Dell server only needs the `IDRAC_HOST`,
+`IDRAC_USERNAME` and `IDRAC_PASSWORD` the compose file already uses.
 
 **Dry run** decides and logs what it would send ("Dry run: would set fans to 25%"), but leaves the fans
 to the BMC. Use it to try a new server type or a new curve.

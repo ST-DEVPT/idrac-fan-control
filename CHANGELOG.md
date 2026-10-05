@@ -3,6 +3,26 @@
 Versions follow [semantic versioning](https://semver.org): a major version (`:2`) never removes a setting
 or changes what an existing one does, so pinning the image to it is safe.
 
+## [2.2.1] - 2026-10-05
+
+Fixes from an independent review of 2.2.0.
+
+- **fan-guard** found the container by a fixed name, `idrac_fan_web`, which the example compose file does
+  not use: with it, the guard took a running Fan Control for dead and handed the fans to the BMC every
+  minute. It now finds the container by its image, leaves a removed container alone, also acts when Docker
+  is down, and covers Supermicro and HPE iLO 4 unlocked as well as Dell. It refuses an `.env` others can
+  write and keeps its state in `/run`.
+- **Data files are written atomically and durably**: a unique temporary file, flushed to disk, renamed,
+  and the folder flushed too. Two writers can no longer collide on one temporary file, and files with
+  passwords or tokens are private from the first byte.
+- **A corrupt or invalid settings file now means automatic fans**, logged once, instead of falling back
+  to the default curve. A corrupt `servers.json`, `alerts.json` or `tokens.json` is kept aside as
+  `<name>.corrupt-<time>` instead of being overwritten by the next save.
+- A negative or malformed `Content-Length` is refused before anything is read.
+- The server page and history are copied under the lock and sent after it, so a slow browser can no
+  longer hold up a control loop. Events are logged under the lock.
+- A backup without secrets no longer contains the ntfy, Gotify or webhook addresses and tokens.
+
 ## [2.2.0] - 2026-10-05
 
 - **Watchdog.** A control loop that stops turning for 3 minutes hands every fan back to its BMC and

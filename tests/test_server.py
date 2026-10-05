@@ -131,6 +131,47 @@ class Scheduled(unittest.TestCase):
         srv.settings_file.unlink()
 
 
+class Durability(unittest.TestCase):
+    def test_corrupt_settings_fall_back_to_automatic(self):
+        srv = Recorder("corrupt")
+        srv.settings_file.write_text('{"mode": "fixed", "fixed_spe')       # power cut mid-write
+        self.assertEqual(srv.settings()["mode"], "auto")
+        self.assertTrue(list(srv.settings_file.parent.glob(srv.settings_file.name + ".corrupt-*")))
+        self.assertIn("corrupt", srv.events[0]["msg"])
+        self.assertEqual(srv.settings()["mode"], "auto")                    # and it stays automatic
+        srv.settings_file.unlink()
+
+    def test_invalid_settings_fall_back_to_automatic(self):
+        srv = Recorder("invalid")
+        write_json(srv.settings_file, {"mode": "fixed", "fixed_speed": "fast"})
+        self.assertEqual(srv.settings()["mode"], "auto")
+        srv.settings()
+        self.assertEqual(sum("invalid" in e["msg"] for e in srv.events), 1)  # said once, not every cycle
+        srv.settings_file.unlink()
+
+    def test_concurrent_writes_never_collide(self):
+        import threading
+        from fanctl.config import DATA_DIR
+        target, errors = DATA_DIR / "race.json", []
+
+        def writer(n):
+            try:
+                for i in range(30):
+                    write_json(target, {"writer": n, "i": i, "pad": "x" * 2000})
+            except Exception as e:  # noqa: BLE001
+                errors.append(e)
+        threads = [threading.Thread(target=writer, args=(n,)) for n in range(6)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+        import json
+        self.assertEqual(json.loads(target.read_text())["i"], 29)
+        self.assertEqual(list(DATA_DIR.glob("race.json.*.tmp")), [])           # nothing left behind
+        target.unlink()
+
+
 class Recorder(Server):
     """A demo server whose fan commands are recorded."""
     def __init__(self, sid):

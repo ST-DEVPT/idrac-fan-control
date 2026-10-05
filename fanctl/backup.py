@@ -21,8 +21,9 @@ def export_config(secrets_too=False):
             row["password"] = s.cfg.get("password", "")
         servers.append(row)
     alerts_cfg = alert_config()
-    if not secrets_too:
-        alerts_cfg = {k: v for k, v in alerts_cfg.items() if k != "webhook_url"}
+    if not secrets_too:  # the webhook, channel addresses (an ntfy topic is its password) and tokens
+        alerts_cfg = {**{k: v for k, v in alerts_cfg.items() if k != "webhook_url"},
+                      "channels": {c: {"enabled": ch["enabled"]} for c, ch in alerts_cfg["channels"].items()}}
     return {"format": "fan-control-backup", "version": 1, "app": VERSION, "exported": int(time.time()),
             "with_secrets": secrets_too, "servers": servers,
             "settings": {s.id: s.settings() for s in list(SERVERS.values())}, "alerts": alerts_cfg,

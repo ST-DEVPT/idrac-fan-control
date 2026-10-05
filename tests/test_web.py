@@ -207,6 +207,31 @@ class HTTP(Base):
         self.assertFalse(updates.newer("nightly", "2.0.0"))
         self.assertIsNone(json.loads(self.get("/api/overview")[2])["update"])
 
+    def test_body_length_is_checked_before_reading(self):
+        for length in ("-1", "abc", "20000"):
+            with self.subTest(length=length):
+                c = http.client.HTTPConnection("127.0.0.1", self.httpd.server_address[1], timeout=5)
+                c.putrequest("POST", "/api/login")
+                c.putheader("Content-Type", "application/json")
+                c.putheader("Content-Length", length)
+                c.endheaders()
+                r = c.getresponse()
+                self.assertIn(r.status, (400, 413))
+                c.close()
+
+    def test_backup_without_secrets_has_no_channel_secrets(self):
+        from fanctl import alerts
+        saved = alerts.alert_config()
+        alerts.save_alerts(alerts.validate_alerts({"channels": {"ntfy": {"enabled": True, "url": "https://ntfy.sh/topic-secret-9",
+                                                                         "token": "tk_secret"}}}, saved))
+        try:
+            data = self.get("/api/export")[2].decode()
+            self.assertNotIn("topic-secret-9", data)
+            self.assertNotIn("tk_secret", data)
+            self.assertIn("topic-secret-9", self.get("/api/export?secrets=1")[2].decode())
+        finally:
+            alerts.save_alerts(saved)
+
     def test_diagnostics(self):
         st, h, data = self.get("/api/servers/rack-a/diagnostics")
         self.assertEqual(st, 200)

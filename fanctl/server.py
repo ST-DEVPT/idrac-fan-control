@@ -10,9 +10,10 @@ import time
 from collections import deque
 
 from .alerts import alert_config, notify
-from .config import DATA_DIR, HISTORY_SECONDS, INTERVAL, LONG_BUCKET, LONG_SECONDS, SAVE_EVERY, STALL_SECONDS, write_json
+from .config import (DATA_DIR, HISTORY_SECONDS, INTERVAL, LONG_BUCKET, LONG_SECONDS, SAVE_EVERY, STALL_SECONDS, read_json,
+                     write_json)
 from .control import (DEFAULT_SETTINGS, aggregate, apply_schedule, curve_speed, decide, failed_fans, learned_curve,
-                      quiet_cap, ramped, smart_step, speed_text, validate_learned)
+                      quiet_cap, ramped, smart_step, speed_text, validate_learned, validate_settings)
 from .drivers import DRIVERS, HOST_RE, DemoDriver, DriverError, RedfishDriver
 
 # ---------------------------------------------------------------- one server
@@ -27,7 +28,7 @@ class Server:
         self.settings_file = DATA_DIR / ("settings.json" if cfg.get("legacy") else f"settings-{self.id}.json")
         self.history_file = DATA_DIR / f"history-{self.id}.json"
         self.smart_file = DATA_DIR / f"smart-{self.id}.json"  # what smart mode learned about this server
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # re-entrant: log() takes it, and is called with it held
         self.wake = threading.Event()
         self.stop = threading.Event()
         self.history = deque(maxlen=HISTORY_SECONDS // INTERVAL)
@@ -49,6 +50,7 @@ class Server:
         self.probe = None        # a speed change whose effect on the RPM is being checked
         self.ignored = False     # the BMC did not follow the last checked change
         self.saved = time.time()
+        self.bad_settings = None  # last validation error of the settings file, logged once
         self.pcie_applied = None
         self.dry_released = False
         self.thread = None
@@ -66,12 +68,27 @@ class Server:
     # ---- settings and persistence
 
     def settings(self):
+        """The saved settings, validated. When the file is corrupt or holds something invalid the
+        safe answer is the BMC's own fan control, never a curve nobody checked."""
+        saved = read_json(self.settings_file, {}, f"settings of {self.name}", corrupt=False)
+        if saved is False:  # corrupt, now kept aside: start again from automatic, and say so
+            s = {**DEFAULT_SETTINGS, "mode": "auto"}
+            write_json(self.settings_file, s)
+            self.log("The settings file was corrupt and was kept aside; the BMC controls the fans until "
+                     "settings are applied again", "error")
+            return s
+        if not isinstance(saved, dict):
+            saved = {}
+        if saved.get("mode") == "dell":  # 1.x name of automatic mode
+            saved["mode"] = "auto"
         try:
-            s = {**DEFAULT_SETTINGS, **json.loads(self.settings_file.read_text())}
-        except (OSError, ValueError):
-            s = dict(DEFAULT_SETTINGS)
-        if s["mode"] == "dell":  # 1.x name of automatic mode
-            s["mode"] = "auto"
+            s = validate_settings(saved, dict(DEFAULT_SETTINGS))
+            self.bad_settings = None
+        except (ValueError, TypeError, KeyError, AttributeError) as e:
+            if self.bad_settings != str(e):
+                self.bad_settings = str(e)
+                self.log(f"Saved settings are invalid ({e}); the BMC controls the fans", "error")
+            s = {**DEFAULT_SETTINGS, "mode": "auto"}
         return s
 
     def save_settings(self, s, who=""):
@@ -124,7 +141,8 @@ class Server:
         self.log(f"Smart mode starts learning afresh{' (' + who + ')' if who else ''}")
 
     def log(self, msg, level="info"):
-        self.events.appendleft({"t": time.time(), "level": level, "msg": msg})
+        with self.lock:  # HTTP threads log too, while reports iterate over the events
+            self.events.appendleft({"t": time.time(), "level": level, "msg": msg})
         print(time.strftime("%H:%M:%S"), f"[{self.id}]", level.upper(), msg, flush=True)
 
     def demo_backfill(self):
@@ -458,20 +476,14 @@ def env_servers(env=os.environ):
 
 
 def dashboard_servers():
-    try:
-        return [s for s in json.loads(SERVERS_FILE.read_text()) if s.get("driver") in DRIVERS]
-    except (OSError, ValueError):
-        return []
+    rows = read_json(SERVERS_FILE, [], "servers.json")
+    return [s for s in rows if isinstance(s, dict) and s.get("driver") in DRIVERS] if isinstance(rows, list) else []
 
 
 def save_dashboard_servers():
     rows = [{k: v for k, v in s.cfg.items() if k != "source"}
             for s in SERVERS.values() if s.cfg.get("source") == "dashboard"]
-    write_json(SERVERS_FILE, rows)
-    try:
-        SERVERS_FILE.chmod(0o600)  # holds BMC passwords
-    except OSError:
-        pass
+    write_json(SERVERS_FILE, rows, private=True)  # holds BMC passwords
 
 
 def start(cfg):
