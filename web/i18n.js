@@ -268,7 +268,7 @@ const PT_PATTERNS = [
   [/^Fans → automatic \((.+)\)$/, "Ventoinhas → automático ($1)"], [/^Fans → (\d+)% \((.+)\)$/, "Ventoinhas → $1% ($2)"],
   [/^Dry run: would set fans to (.+)$/, "Simulação: poria as ventoinhas a $1"],
   [/^Settings saved by (.+): mode (.+)$/, "Definições guardadas por $1: modo $2"], [/^Settings saved: mode (.+)$/, "Definições guardadas: modo $1"],
-  [/^Started: (.+)$/, "Iniciado: $1"], [/^Could not save: (.+)$/, "Não foi possível guardar: $1"],
+  [/^Started: (.+)$/, "Iniciado: $1"], [/^v(.+) available$/, "v$1 disponível"], [/^Could not save: (.+)$/, "Não foi possível guardar: $1"],
   [/^Test "(.+)" sent to (ntfy|gotify|webhook)$/, "Teste \"$1\" enviado para $2"],
   [/^Revoke (.+)\? Whatever uses it stops working\.$/, "Revogar $1? O que o usa deixa de funcionar."],
   [/^Fan (.+) failed: (.+)$/, "Ventoinha $1 avariada: $2"], [/^Fan (.+) is spinning again$/, "A ventoinha $1 voltou a rodar"],

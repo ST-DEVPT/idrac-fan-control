@@ -11,7 +11,7 @@ import threading
 import time
 from http.server import ThreadingHTTPServer
 
-from fanctl import config, web
+from fanctl import config, updates, web
 from fanctl.alerts import DISCORD_WEBHOOK, WEBHOOK_RE, reporter
 from fanctl.server import SERVERS, load_registry, stalled
 
@@ -66,6 +66,7 @@ def main():
         srv.start()
     threading.Thread(target=reporter, args=(SERVERS,), daemon=True, name="reporter").start()
     threading.Thread(target=watchdog, daemon=True, name="watchdog").start()
+    threading.Thread(target=updates.loop, daemon=True, name="updates").start()
     print(f"Fan Control {config.VERSION} listening on :{config.PORT} for {len(SERVERS)} server(s)", flush=True)
     ThreadingHTTPServer(("0.0.0.0", config.PORT), web.Handler).serve_forever()
 

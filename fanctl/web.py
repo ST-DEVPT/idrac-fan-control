@@ -10,7 +10,7 @@ import time
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, tokens
+from . import config, tokens, updates
 from .alerts import (ALERT_KINDS, CHANNELS, SAMPLE, alert_config, build_payload, build_report, post_webhook,
                      public_alert_config, save_alerts, send_channel, validate_alerts, webhook_of)
 from .backup import export_config, import_config
@@ -282,6 +282,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, {"servers": [s.summary() for s in list(SERVERS.values())], "role": self.role(),
                                    "drivers": [d.info() for d in DRIVERS.values()],
                                    "auth": bool(config.WEB_PASSWORD), "version": VERSION, "interval": INTERVAL,
+                                   "update": updates.available(),
                                    "alerts": bool(webhook_of(alert_config()))})
         if path.startswith("/api/servers/") and path.endswith("/diagnostics") and path.count("/") == 4:
             srv = SERVERS.get(path.split("/")[3])

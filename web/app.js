@@ -84,6 +84,11 @@ async function pollOverview() {
     $("#signout").hidden = !overview.auth;
     document.body.classList.toggle("viewer", overview.role === "viewer");
     $("#version").textContent = /^\d/.test(overview.version) ? "v" + overview.version : overview.version;
+    $("#update").hidden = !overview.update;
+    if (overview.update) {
+      $("#update").href = overview.update.url;
+      $("#update").textContent = `v${overview.update.version} available`;
+    }
     renderSide();
     if (route.view === "overview") renderOverview();
   } catch { /* the server view shows the connection state */ }

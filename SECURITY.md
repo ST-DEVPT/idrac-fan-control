@@ -29,6 +29,8 @@ It is not meant to be exposed to the internet.
   metrics token opens `/metrics` only. Neither can sign in or make a change. Tokens created in the
   dashboard are stored as a SHA-256 hash (`tokens.json`, mode 600), shown once, compared in constant time,
   and can be revoked one by one; `EMBED_TOKEN` and `METRICS_TOKEN` from the environment work alongside.
+- **Outbound requests**: only to the BMCs, the alert channels you configure, and GitHub's API twice a day
+  for the latest release (`UPDATE_CHECK=false` turns that off). Nothing about your servers is sent.
 - **Credentials**: iDRAC passwords are read from the environment, passed to `ipmitool` through its
   environment (never on the command line), and never sent to the browser. `ipmitool` gets no other
   environment variables.

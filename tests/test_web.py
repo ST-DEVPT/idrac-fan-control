@@ -199,6 +199,14 @@ class HTTP(Base):
         finally:
             self.post("/api/tokens/revoke", {"id": made["id"]})
 
+    def test_update_notice(self):
+        from fanctl import updates
+        self.assertTrue(updates.newer("2.10.0", "2.9.3"))
+        self.assertFalse(updates.newer("2.1.0", "2.1.0"))
+        self.assertFalse(updates.newer("3.0.0", "dev"))               # a development build never asks
+        self.assertFalse(updates.newer("nightly", "2.0.0"))
+        self.assertIsNone(json.loads(self.get("/api/overview")[2])["update"])
+
     def test_diagnostics(self):
         st, h, data = self.get("/api/servers/rack-a/diagnostics")
         self.assertEqual(st, 200)
