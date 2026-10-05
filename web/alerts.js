@@ -1,6 +1,7 @@
 // Discord alert settings: edited as a draft, previewed live, tested before saving.
 let alerts = null, aDraft = null, aDirty = false, aKind = "failsafe", aField = "message";
 let newWebhook;  // undefined: keep the stored one; "": remove it; otherwise the URL to save
+let newSecrets = {};  // channel -> {url?, token?}: only what was typed, so stored secrets stay unless replaced
 
 const KIND_NAMES = {
   failsafe: "Failsafe reached", failsafe_cleared: "Failsafe cleared", hot: "Running hot",
@@ -23,8 +24,9 @@ async function loadAlerts() {
   if (!r.ok) return;
   alerts = await r.json();
   aDraft = structuredClone(alerts);
-  newWebhook = undefined; aDirty = false;
+  newWebhook = undefined; newSecrets = {}; aDirty = false;
   $("#al-webhook").value = "";
+  $$("#channels input[type=password]").forEach(i => i.value = "");
   renderAlerts();
 }
 
@@ -33,6 +35,7 @@ function body() {
                 "cooldown_minutes", "hot_threshold", "inlet_threshold", "failsafe_minutes", "report_minutes", "report_mode", "colors", "events"];
   const b = Object.fromEntries(keys.map(k => [k, aDraft[k]]));
   if (newWebhook !== undefined) b.webhook_url = newWebhook;
+  b.channels = Object.fromEntries(Object.entries(aDraft.channels).map(([c, ch]) => [c, { enabled: ch.enabled, ...newSecrets[c] }]));
   return b;
 }
 
@@ -44,6 +47,7 @@ function setIfIdle(sel, value, prop = "value") {
 }
 
 function renderAlerts() {
+  renderChannels();
   const d = aDraft, w = alerts.webhook;
   const removing = newWebhook === "", replacing = !!newWebhook;
   $("#al-status").textContent = removing ? "Webhook will be removed"
@@ -211,8 +215,9 @@ $("#al-save").onclick = async () => {
   const r = await postJSON("/api/alerts", body());
   const res = await r.json();
   if (!r.ok) { toast("Could not save: " + res.error, true); $("#al-save").disabled = false; return; }
-  alerts = res; aDraft = structuredClone(res); newWebhook = undefined; aDirty = false;
+  alerts = res; aDraft = structuredClone(res); newWebhook = undefined; newSecrets = {}; aDirty = false;
   $("#al-webhook").value = "";
+  $$("#channels input[type=password]").forEach(i => i.value = "");
   renderAlerts();
   toast("Alert settings saved");
 };
@@ -223,5 +228,37 @@ $("#al-test").onclick = async () => {
   toast(r.ok ? `Test "${KIND_NAMES[aKind]}" sent to Discord${aKind === "report" ? " with the current readings" : ""}` : "Test failed: " + (await r.json()).error, !r.ok);
   $("#al-test").disabled = false;
 };
+
+// ---------------------------------------------------------------- ntfy, Gotify, webhook
+function renderChannels() {
+  for (const box of $$("#channels .ch")) {
+    const c = box.dataset.ch, ch = aDraft.channels[c], saved = alerts.channels[c];
+    box.querySelector("[data-f=enabled]").checked = ch.enabled;
+    const url = box.querySelector("[data-f=url]"), token = box.querySelector("[data-f=token]");
+    if (saved.url_set && !url.value) url.placeholder = `${translate("Saved")} (${saved.url_hint})`;
+    if (token && saved.token_set && !token.value) token.placeholder = translate("Saved. Type to replace");
+    box.classList.toggle("off", !ch.enabled);
+  }
+}
+$("#channels").addEventListener("change", e => {
+  const box = e.target.closest(".ch");
+  if (e.target.dataset.f === "enabled") { aDraft.channels[box.dataset.ch].enabled = e.target.checked; aTouch(); }
+});
+$("#channels").addEventListener("input", e => {
+  const box = e.target.closest(".ch"), f = e.target.dataset.f;
+  if (f === "url" || f === "token") {
+    newSecrets[box.dataset.ch] = { ...newSecrets[box.dataset.ch], [f]: e.target.value.trim() };
+    aTouch();
+  }
+});
+$("#channels").addEventListener("click", async e => {
+  const b = e.target.closest("[data-test]");
+  if (!b) return;
+  const c = b.closest(".ch").dataset.ch, kind = aKind === "report" ? "failsafe" : aKind;
+  b.disabled = true;
+  const r = await postJSON("/api/test-alert", { kind, channel: c, config: body() });
+  toast(r.ok ? `Test "${KIND_NAMES[kind]}" sent to ${c}` : "Test failed: " + (await r.json()).error, !r.ok);
+  b.disabled = false;
+});
 
 loadAlerts();

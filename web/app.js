@@ -68,7 +68,7 @@ function go() {
   if (route.view === "edit") openEditor();
   if (route.view === "overview") renderOverview();
   if (["prometheus", "grafana", "homarr"].includes(route.view)) renderIntegration(route.view);
-  const title = { overview: "Overview", alerts: "Discord", prometheus: "Prometheus", grafana: "Grafana", homarr: "Homarr", backup: "Backup",
+  const title = { overview: "Overview", alerts: "Alerts", prometheus: "Prometheus", grafana: "Grafana", homarr: "Homarr", backup: "Backup",
                   edit: route.id ? "Edit server" : "Add a server" }[route.view];
   if (title) document.title = `${translate(title)} · Fan Control`;
   scrollTo(0, 0);

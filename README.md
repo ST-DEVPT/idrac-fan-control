@@ -37,7 +37,7 @@ everything else.
 [Quick start](#quick-start) ·
 [Configuration](#configuration) ·
 [Fan control](#fan-control) ·
-[Discord](#discord) ·
+[Alerts](#alerts) ·
 [Integrations](#integrations) ·
 [Accounts and security](#accounts-and-security) ·
 [Backup](#backup) ·
@@ -145,7 +145,10 @@ The 1.x variables still work and keep their settings: `IDRAC_HOST`, `IDRAC_USERN
 | `servers.json` | Servers added in the dashboard, with their BMC passwords (file mode 600, never sent to the browser) |
 | `settings.json`, `settings-<server>.json` | Mode, curve, targets, limits, quiet hours and the other fan settings |
 | `history-<server>.json` | Three hours of readings, seven days of 5-minute averages, and the events |
-| `alerts.json` | Discord settings, including the webhook (file mode 600, never sent to the browser) |
+| `alerts.json` | Alert settings, including the Discord webhook and the ntfy, Gotify and webhook addresses and tokens (file mode 600, never sent to the browser) |
+| `smart-<server>.json` | What smart mode learned: the fan speed each heat load needs |
+| `widget.json` | Which fields widgets may show |
+| `tokens.json` | Widget and metrics tokens, as SHA-256 hashes (file mode 600) |
 | `report-state.json` | Which Discord message the status card is edited into |
 | `known_hosts` | SSH host keys of unlocked iLO 4 servers, recorded on first connection |
 | `secret` | Key that signs sign-in sessions. Delete it to sign everyone out |
@@ -234,9 +237,9 @@ controller then finds the fans they accept and sets them one by one. Supermicro 
 mode once, then both zones are set; it goes back to *Optimal* when released. An unlocked iLO 4 gets a cap on
 every fan over SSH (`fan p N max`), so its own curve still runs underneath; releasing removes the cap.
 
-## Discord
+## Alerts
 
-Open **Discord** in the sidebar and paste a webhook (Server Settings → Integrations → Webhooks → Copy
+Open **Alerts** in the sidebar and paste a Discord webhook (Server Settings → Integrations → Webhooks → Copy
 Webhook URL). Everything else is optional: bot name, avatar, footer, a colour per level, mentions (nobody,
 `@here`, `@everyone`, a role or a user, only for the levels you choose), a cooldown, and which events to send,
 each with its own title and message. A live preview shows the result and **Send test** posts it before you
@@ -268,6 +271,12 @@ the period, air temperatures, time under automatic control, trend lines and the 
 the same message is edited each time, so the channel holds one live status card.
 
 <img alt="Discord status report" src="docs/discord-report.jpg" width="640">
+
+**ntfy, Gotify and any webhook.** Under *Other channels*, the same events and texts go out as plain text:
+to an ntfy topic (`https://ntfy.sh/my-topic`, with an access token if the topic is protected), to a Gotify
+application, or as JSON to any URL (event, level, title, message, server, time and values), which Home
+Assistant, n8n and most automation tools take as is. Each has its own **Send test**. The status card stays
+on Discord only.
 
 ## Integrations
 

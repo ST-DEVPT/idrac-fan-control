@@ -14,7 +14,7 @@
   <a class="brand" href="#/"><img src="/static/icon.svg" alt=""><span>Fan Control</span></a>
   <nav class="side-nav" aria-label="Main">
     <a href="#/" data-route="overview">Overview</a>
-    <a href="#/alerts" data-route="alerts">Discord</a>
+    <a href="#/alerts" data-route="alerts">Alerts</a>
   </nav>
   <div class="side-label"><span>Integrations</span></div>
   <nav class="side-nav" aria-label="Integrations">
@@ -460,8 +460,8 @@
 <section class="view" id="v-alerts" hidden>
   <header class="page-head">
     <div>
-      <h1>Discord</h1>
-      <p class="lede">Alerts when something needs you, and a status card that keeps itself up to date.</p>
+      <h1>Alerts</h1>
+      <p class="lede">Alerts when something needs you, on Discord, ntfy, Gotify or any webhook, and a Discord status card that keeps itself up to date.</p>
     </div>
   </header>
   <section class="alerts" id="alerts">
@@ -545,6 +545,30 @@
           <button class="btn" id="al-discard" type="button" disabled>Discard</button>
           <button class="btn primary" id="al-save" type="button" disabled>Save</button>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="alerts channels" id="channels">
+    <div class="hd"><h2>Other channels</h2><span class="aside">The same events and texts as Discord, as plain text. Saved with the button above.</span></div>
+    <div class="ch-grid">
+      <div class="ch" data-ch="ntfy">
+        <label class="switch"><input type="checkbox" data-f="enabled"><span><b>ntfy</b></span></label>
+        <div class="fld"><label>Topic URL</label><input type="password" data-f="url" autocomplete="off" spellcheck="false" placeholder="https://ntfy.sh/my-topic"></div>
+        <div class="fld"><label>Access token <small>optional</small></label><input type="password" data-f="token" autocomplete="off" spellcheck="false" placeholder="tk_…"></div>
+        <button class="inline-btn" data-test type="button">Send test</button>
+      </div>
+      <div class="ch" data-ch="gotify">
+        <label class="switch"><input type="checkbox" data-f="enabled"><span><b>Gotify</b></span></label>
+        <div class="fld"><label>Server URL</label><input type="password" data-f="url" autocomplete="off" spellcheck="false" placeholder="https://gotify.example.com"></div>
+        <div class="fld"><label>Application token</label><input type="password" data-f="token" autocomplete="off" spellcheck="false" placeholder="A…"></div>
+        <button class="inline-btn" data-test type="button">Send test</button>
+      </div>
+      <div class="ch" data-ch="webhook">
+        <label class="switch"><input type="checkbox" data-f="enabled"><span><b>Webhook</b></span></label>
+        <div class="fld"><label>URL</label><input type="password" data-f="url" autocomplete="off" spellcheck="false" placeholder="https://…"></div>
+        <p class="hint">Receives each alert as JSON: event, level, title, message, server, time and values. Home Assistant, n8n and most automation tools take it as is.</p>
+        <button class="inline-btn" data-test type="button">Send test</button>
       </div>
     </div>
   </section>

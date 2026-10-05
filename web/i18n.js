@@ -103,6 +103,14 @@ const PT = {
   "created": "criado", "last used": "último uso", "from the environment": "do ambiente", "No token yet.": "Ainda não há tokens.",
   "Token revoked": "Token revogado",
   "Copy it now: only a hash of it is kept, so it is not shown again.": "Copie-o já: só fica guardado um hash, por isso não volta a aparecer.",
+  "Alerts": "Alertas", "Other channels": "Outros canais", "Topic URL": "URL do tópico", "Access token": "Token de acesso",
+  "optional": "opcional", "Server URL": "URL do servidor", "Application token": "Token da aplicação", "Saved": "Guardado",
+  "Saved. Type to replace": "Guardado. Escreva para substituir",
+  "The same events and texts as Discord, as plain text. Saved with the button above.": "Os mesmos eventos e textos do Discord, em texto simples. Guardam-se com o botão acima.",
+  "Receives each alert as JSON: event, level, title, message, server, time and values. Home Assistant, n8n and most automation tools take it as is.":
+    "Recebe cada alerta em JSON: evento, nível, título, mensagem, servidor, hora e valores. O Home Assistant, o n8n e a maioria das ferramentas de automação aceitam-no tal como vem.",
+  "Alerts when something needs you, on Discord, ntfy, Gotify or any webhook, and a Discord status card that keeps itself up to date.":
+    "Alertas quando algo precisa de si, no Discord, ntfy, Gotify ou qualquer webhook, e um cartão de estado no Discord que se mantém atualizado.",
   "Not sure? Let the BMC tell you.": "Não tem a certeza? Pergunte ao BMC.", "Detect": "Detetar",
   "Find BMCs on your network.": "Procure BMCs na sua rede.", "Scan network": "Procurar na rede", "Network range to scan": "Gama de rede a procurar",
   "Answers": "Responde a", "Suggested": "Sugestão", "Use": "Usar", "Added": "Adicionado", "Unknown": "Desconhecido",
@@ -229,6 +237,7 @@ const PT_PATTERNS = [
   [/^Dry run: would set fans to (.+)$/, "Simulação: poria as ventoinhas a $1"],
   [/^Settings saved by (.+): mode (.+)$/, "Definições guardadas por $1: modo $2"], [/^Settings saved: mode (.+)$/, "Definições guardadas: modo $1"],
   [/^Started: (.+)$/, "Iniciado: $1"],
+  [/^Test "(.+)" sent to (ntfy|gotify|webhook)$/, "Teste \"$1\" enviado para $2"],
   [/^Revoke (.+)\? Whatever uses it stops working\.$/, "Revogar $1? O que o usa deixa de funcionar."],
   [/^Fan (.+) failed: (.+)$/, "Ventoinha $1 avariada: $2"], [/^Fan (.+) is spinning again$/, "A ventoinha $1 voltou a rodar"],
   [/^The BMC did not follow the fans to (\d+)%: their RPM stayed near (\d+)$/, "O BMC não levou as ventoinhas a $1%: ficaram perto de $2 RPM"],

@@ -48,6 +48,51 @@ class Config(unittest.TestCase):
                 alerts.validate_alerts(bad, alerts.alert_config())
 
 
+class Channels(unittest.TestCase):
+    def test_validation_and_secrets(self):
+        cfg = alerts.validate_alerts({"channels": {"ntfy": {"enabled": True, "url": "https://ntfy.sh/fans-xyz42", "token": "tk_abc"}}},
+                                     alerts.alert_config())
+        self.assertEqual(alerts.channels_of(cfg), ["ntfy"])
+        pub = alerts.public_alert_config(cfg)["channels"]["ntfy"]
+        self.assertEqual((pub["url_set"], pub["token_set"]), (True, True))
+        self.assertNotIn("fans-xyz42", json.dumps(alerts.public_alert_config(cfg)))   # the topic is the password
+        self.assertNotIn("tk_abc", json.dumps(alerts.public_alert_config(cfg)))
+        kept = alerts.validate_alerts({"channels": {"ntfy": {"enabled": False}}}, cfg)
+        self.assertEqual(kept["channels"]["ntfy"]["url"], "https://ntfy.sh/fans-xyz42")
+        for bad in ({"ntfy": {"url": "ftp://x/y"}}, {"ntfy": {"url": "https://ntfy.sh"}}, {"nope": {}},
+                    {"gotify": {"token": "a b"}}, {"webhook": {"enabled": "yes"}}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                alerts.validate_alerts({"channels": bad}, alerts.alert_config())
+
+    def test_what_each_channel_receives(self):
+        sent = []
+
+        class Answer:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self, n): return b"{}"
+
+        def fake(req, timeout):
+            sent.append((req.full_url, dict(req.header_items()), json.loads(req.data)))
+            return Answer()
+        cfg = alerts.validate_alerts({"channels": {
+            "ntfy": {"enabled": True, "url": "https://ntfy.example.com/sub/fans", "token": "tk_1"},
+            "gotify": {"enabled": True, "url": "https://gotify.example.com/", "token": "Aabc"},
+            "webhook": {"enabled": True, "url": "https://hooks.example.com/x?k=1"}}}, alerts.alert_config())
+        real, alerts.urllib.request.urlopen = alerts.urllib.request.urlopen, fake
+        try:
+            for c in alerts.CHANNELS:
+                alerts.send_channel(cfg, c, "failsafe", alerts.SAMPLE)
+        finally:
+            alerts.urllib.request.urlopen = real
+        (nu, nh, nb), (gu, gh, gb), (wu, wh, wb) = sent
+        self.assertEqual((nu, nb["topic"], nb["priority"], nh["Authorization"]), ("https://ntfy.example.com/sub/", "fans", 4, "Bearer tk_1"))
+        self.assertEqual(nb["title"], "Rack A: failsafe")
+        self.assertIn("CPU 71°C", nb["message"])
+        self.assertEqual((gu, gh["X-gotify-key"], gb["priority"]), ("https://gotify.example.com/message", "Aabc", 6))
+        self.assertEqual((wu, wb["event"], wb["level"], wb["server"]), ("https://hooks.example.com/x?k=1", "failsafe", "warn", "Rack A"))
+
+
 class Reports(unittest.TestCase):
     def test_sparkline(self):
         self.assertEqual(alerts.sparkline([1, 2, 3, 4, 5, 6, 7, 8]), "▁▂▃▄▅▆▇█")

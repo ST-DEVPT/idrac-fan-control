@@ -11,8 +11,8 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlsplit
 
 from . import config, tokens
-from .alerts import (ALERT_KINDS, SAMPLE, alert_config, build_payload, build_report, post_webhook,
-                     public_alert_config, save_alerts, validate_alerts, webhook_of)
+from .alerts import (ALERT_KINDS, CHANNELS, SAMPLE, alert_config, build_payload, build_report, post_webhook,
+                     public_alert_config, save_alerts, send_channel, validate_alerts, webhook_of)
 from .config import DATA_DIR, INTERVAL, VERSION, WEB, write_json
 from .control import validate_settings
 from .drivers import DRIVERS, DriverError, detect, scan
@@ -617,6 +617,17 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError, AttributeError) as e:
                 return self.send(400, {"error": str(e)})
             kind = body.get("kind", "failsafe")
+            channel = body.get("channel")
+            if channel is not None:  # ntfy, Gotify or the webhook: plain text, sample values
+                if channel not in CHANNELS or kind not in ALERT_KINDS or kind == "report":
+                    return self.send(400, {"error": "unknown channel or alert"})
+                if not cfg["channels"][channel]["url"]:
+                    return self.send(400, {"error": f"no {channel} address configured"})
+                try:
+                    send_channel(cfg, channel, kind, SAMPLE, "[test] ")
+                except Exception as e:
+                    return self.send(502, {"error": f"{channel} answered: {e}"})
+                return self.send(200, {"ok": True})
             url = webhook_of(cfg)
             if kind not in ALERT_KINDS or not url:
                 return self.send(400, {"error": "unknown alert" if url else "no Discord webhook configured"})

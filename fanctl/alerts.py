@@ -1,4 +1,4 @@
-"""Discord alerts and status reports."""
+"""Alerts (Discord, ntfy, Gotify, any webhook) and Discord status reports."""
 
 import hashlib
 import json
@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from . import config
 from .config import DATA_DIR, DISCORD_WEBHOOK, INTERVAL, VERSION, write_json
@@ -18,6 +19,7 @@ from .control import speed_text
 ALERTS_FILE = DATA_DIR / "alerts.json"
 WEBHOOK_RE = re.compile(r"https://(?:(?:ptb|canary)\.)?(?:discord|discordapp)\.com/api/webhooks/\d+/[\w-]+")
 LEVELS = ("error", "warn", "ok", "info")
+CHANNELS = ("ntfy", "gotify", "webhook")  # besides Discord; they get the same events as plain text
 
 # kind: (level, default title, default message). {placeholders} are filled per alert.
 ALERT_KINDS = {
@@ -64,6 +66,9 @@ ALERT_DEFAULTS = {
     "colors": {"error": "#c0301c", "warn": "#e4501b", "ok": "#3b7a39", "info": "#4f4d48"},
     "events": {k: {"enabled": k not in ("hot", "settings_changed", "started", "report"), "title": t, "message": m}
                for k, (_, t, m) in ALERT_KINDS.items()},
+    # ntfy: the topic URL (https://ntfy.sh/my-topic) and an optional access token; Gotify: the server
+    # URL and an application token; webhook: any URL, which receives the alert as JSON
+    "channels": {c: {"enabled": False, "url": "", "token": ""} for c in CHANNELS},
 }
 alert_lock = threading.Lock()
 last_alert = {}  # (server id, kind) -> time, for the cooldown
@@ -77,7 +82,12 @@ def alert_config():
     cfg = {**ALERT_DEFAULTS, **{k: v for k, v in saved.items() if k in ALERT_DEFAULTS}}
     cfg["colors"] = {**ALERT_DEFAULTS["colors"], **saved.get("colors", {})}
     cfg["events"] = {k: {**ALERT_DEFAULTS["events"][k], **saved.get("events", {}).get(k, {})} for k in ALERT_KINDS}
+    cfg["channels"] = {c: {**ALERT_DEFAULTS["channels"][c], **(saved.get("channels") or {}).get(c, {})} for c in CHANNELS}
     return cfg
+
+
+def channels_of(cfg):
+    return [c for c in CHANNELS if cfg["channels"][c]["enabled"] and cfg["channels"][c]["url"]]
 
 
 def webhook_of(cfg):
@@ -89,12 +99,22 @@ def public_alert_config(cfg):
     """What the browser may see: everything except the webhook secret."""
     own, env = cfg["webhook_url"], DISCORD_WEBHOOK if WEBHOOK_RE.fullmatch(DISCORD_WEBHOOK or "") else ""
     shown = own or env
-    return {**{k: v for k, v in cfg.items() if k != "webhook_url"},
+    channels = {c: {"enabled": ch["enabled"], "url_set": bool(ch["url"]), "url_hint": hint_of(ch["url"]),
+                    "token_set": bool(ch["token"])} for c, ch in cfg["channels"].items()}
+    return {**{k: v for k, v in cfg.items() if k not in ("webhook_url", "channels")}, "channels": channels,
             "webhook": {"set": bool(shown), "source": "dashboard" if own else "environment" if env else None,
                         "hint": "…" + shown[-4:] if shown else ""},
             "kinds": {k: lvl for k, (lvl, _, _) in ALERT_KINDS.items()}, "placeholders": PLACEHOLDERS,
             "report_placeholders": REPORT_PLACEHOLDERS,
             "defaults": {k: {"title": t, "message": m} for k, (_, t, m) in ALERT_KINDS.items()}}
+
+
+def hint_of(url):
+    """Enough of a URL to recognise it, not enough to use it: an ntfy topic name is its password."""
+    if not url:
+        return ""
+    u = urlsplit(url)
+    return f"{u.scheme}://{u.netloc}/…{url[-4:]}" if len(u.path) > 5 else f"{u.scheme}://{u.netloc}{u.path}"
 
 
 def validate_alerts(new, current):
@@ -167,6 +187,25 @@ def validate_alerts(new, current):
         if level not in LEVELS or not re.fullmatch(r"#[0-9a-fA-F]{6}", str(color)):
             raise ValueError("colors must be #rrggbb for error, warn, ok and info")
         cfg["colors"][level] = color.lower()
+    for c, ch in (new.get("channels") or {}).items():
+        if c not in CHANNELS or not isinstance(ch, dict):
+            raise ValueError(f"unknown channel {c}")
+        if "enabled" in ch:
+            if type(ch["enabled"]) is not bool:
+                raise ValueError(f"{c} enabled must be true or false")
+            cfg["channels"][c]["enabled"] = ch["enabled"]
+        if "url" in ch:  # absent keeps the stored one, "" clears it
+            v = str(ch["url"]).strip()
+            if v and not re.fullmatch(r"https?://[^\s\"<>]{3,500}", v):
+                raise ValueError(f"{c} address must be an http:// or https:// URL")
+            if v and c == "ntfy" and len(urlsplit(v).path.strip("/")) == 0:
+                raise ValueError("the ntfy address needs the topic, like https://ntfy.sh/my-topic")
+            cfg["channels"][c]["url"] = v
+        if "token" in ch:
+            v = str(ch["token"]).strip()
+            if len(v) > 200 or re.search(r"\s", v):
+                raise ValueError(f"{c} token must be up to 200 characters, without spaces")
+            cfg["channels"][c]["token"] = v
     for kind, ev in (new.get("events") or {}).items():
         if kind not in ALERT_KINDS or not isinstance(ev, dict):
             raise ValueError(f"unknown alert {kind}")
@@ -220,6 +259,50 @@ def build_payload(cfg, kind, values):
     if cfg["avatar_url"]:
         payload["avatar_url"] = cfg["avatar_url"]
     return payload
+
+
+def plain(cfg, kind, values):
+    """An alert as plain text, for every channel but Discord: (level, title, message)."""
+    level, ev = ALERT_KINDS[kind][0], cfg["events"][kind]
+    message = fill(ev["message"], values)[:4000]
+    if cfg["details"]:
+        cpu = values.get("cpu")
+        message += f"\nCPU {cpu}°C · fans {values.get('speed') or '—'} · mode {values.get('mode') or '—'}" if cpu not in (None, "", "—") \
+            else f"\nFans {values.get('speed') or '—'} · mode {values.get('mode') or '—'}"
+    return level, fill(ev["title"], values)[:250], message
+
+
+NTFY_PRIORITY = {"error": 5, "warn": 4, "ok": 3, "info": 2}
+NTFY_TAGS = {"error": "rotating_light", "warn": "warning", "ok": "white_check_mark", "info": "information_source"}
+GOTIFY_PRIORITY = {"error": 8, "warn": 6, "ok": 4, "info": 2}
+
+
+def send_channel(cfg, channel, kind, values, prefix=""):
+    """Send one alert to ntfy, Gotify or a webhook. Raises on failure."""
+    level, title, message = plain(cfg, kind, values)
+    title = prefix + title
+    ch = cfg["channels"][channel]
+    headers = {"Content-Type": "application/json", "User-Agent": f"fan-control/{VERSION}"}
+    if channel == "ntfy":
+        u = urlsplit(ch["url"])
+        base, _, topic = u.path.rstrip("/").rpartition("/")
+        url = f"{u.scheme}://{u.netloc}{base}/"  # JSON publishing goes to the server root, topic in the body
+        body = {"topic": topic, "title": title, "message": message, "priority": NTFY_PRIORITY[level],
+                "tags": [NTFY_TAGS[level]]}
+        if ch["token"]:
+            headers["Authorization"] = f"Bearer {ch['token']}"
+    elif channel == "gotify":
+        url = ch["url"].rstrip("/") + "/message"
+        body = {"title": title, "message": message, "priority": GOTIFY_PRIORITY[level]}
+        headers["X-Gotify-Key"] = ch["token"]
+    else:
+        url = ch["url"]
+        body = {"event": kind, "level": level, "title": title, "message": message,
+                "server": values.get("server"), "time": datetime.now(timezone.utc).isoformat(),
+                "values": {k: str(v) for k, v in values.items()}}
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers=headers)
+    with urllib.request.urlopen(req, timeout=10) as r:
+        r.read(65536)
 
 
 def post_webhook(url, payload, method="POST"):
@@ -358,8 +441,8 @@ def reporter(servers):
 def notify(server, kind, **values):
     """Send one alert in the background, so a slow Discord never delays the fans."""
     cfg = alert_config()
-    url = webhook_of(cfg)
-    if kind == "report" or not (url and cfg["enabled"] and cfg["events"][kind]["enabled"]):
+    url, chans = webhook_of(cfg), channels_of(cfg)
+    if kind == "report" or not ((url or chans) and cfg["enabled"] and cfg["events"][kind]["enabled"]):
         return
     key, now = (server.id, kind), time.time()
     with alert_lock:
@@ -374,12 +457,18 @@ def notify(server, kind, **values):
             "failsafe": s["failsafe_temp"], "threshold": cfg["hot_threshold"], "interval": INTERVAL,
             "time": time.strftime("%H:%M:%S"), "inlet_threshold": cfg["inlet_threshold"],
             "inlet": "—" if (st["sensors"] or {}).get("inlet") is None else f"{st['sensors']['inlet']:.0f}"}
-    payload = build_payload(cfg, kind, {**base, **values})
+    values = {**base, **values}
 
     def send():
-        try:
-            post_webhook(url, payload)
-        except Exception as e:
-            print("Discord webhook failed:", e, flush=True)
+        if url:
+            try:
+                post_webhook(url, build_payload(cfg, kind, values))
+            except Exception as e:
+                print("Discord webhook failed:", e, flush=True)
+        for c in chans:  # one failing channel never stops the others
+            try:
+                send_channel(cfg, c, kind, values)
+            except Exception as e:
+                print(f"{c} alert failed:", e, flush=True)
 
     threading.Thread(target=send, daemon=True).start()

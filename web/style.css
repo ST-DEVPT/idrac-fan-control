@@ -604,3 +604,14 @@ body.viewer #hm-fields { pointer-events: none; opacity: .6; }
 .tok-list { max-width: 760px; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
 .tok-list td { padding: 7px 14px 7px 0; border-top: 1px solid var(--rule); }
 .tok-list td.r { text-align: right; padding-right: 0; }
+
+/* alert channels besides Discord */
+.channels { margin-top: 18px; }
+.ch-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.ch { border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; display: grid; gap: 10px; align-content: start; background: var(--surface); }
+.ch.off .fld, .ch.off .hint { opacity: .55; }
+.channels > .hd h2 { display: block; margin: 0 12px 0 0; font-size: 15px; }
+.ch .switch { margin-left: 0; }
+.ch .fld input { width: 100%; box-sizing: border-box; }
+@media (max-width: 900px) { .ch-grid { grid-template-columns: 1fr; } }
+body.viewer #channels { pointer-events: none; opacity: .75; }
