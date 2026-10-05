@@ -14,17 +14,17 @@
   <a class="brand" href="#/"><img src="/static/icon.svg" alt=""><span>Fan Control</span></a>
   <nav class="side-nav" aria-label="Main">
     <a href="#/" data-route="overview">Overview</a>
-    <a href="#/alerts" data-route="alerts">Alerts</a>
   </nav>
-  <div class="side-label"><span>Integrations</span></div>
-  <nav class="side-nav" aria-label="Integrations">
+  <div class="side-label"><span>Servers</span><a href="#/add" class="side-add" title="Add a server" aria-label="Add a server">+</a></div>
+  <nav class="side-servers" id="side-servers" aria-label="Servers"></nav>
+  <div class="side-label"><span>Settings</span></div>
+  <nav class="side-nav side-settings" aria-label="Settings">
+    <a href="#/alerts" data-route="alerts">Alerts</a>
     <a href="#/prometheus" data-route="prometheus">Prometheus</a>
     <a href="#/grafana" data-route="grafana">Grafana</a>
     <a href="#/homarr" data-route="homarr">Homarr</a>
     <a href="#/backup" data-route="backup">Backup</a>
   </nav>
-  <div class="side-label"><span>Servers</span><a href="#/add" class="side-add" title="Add a server" aria-label="Add a server">+</a></div>
-  <nav class="side-servers" id="side-servers" aria-label="Servers"></nav>
   <div class="side-foot">
     <span id="version"></span>
     <a id="update" target="_blank" rel="noopener" hidden></a>
@@ -38,6 +38,7 @@
 </aside>
 
 <div class="main">
+  <div class="offline-banner" id="offline" role="status" hidden></div>
 
 <!-- ======================================================== overview -->
 <section class="view" id="v-overview" hidden>
@@ -51,7 +52,7 @@
   <div class="fleet" id="fleet"></div>
   <div class="welcome" id="welcome" hidden>
     <h2>Add your first server</h2>
-    <p>Pick the hardware you have, or <a href="#/add">scan your network</a> for BMCs. Dell iDRAC and Supermicro get
+    <p data-i18n="add-lede">Pick the hardware you have, or <a href="#/add">scan your network</a> for BMCs. Dell iDRAC and Supermicro get
       full fan control; HPE iLO and other Redfish or IPMI servers are monitored, with history, alerts and Grafana.</p>
     <div class="tiles" id="welcome-tiles"></div>
   </div>
@@ -143,7 +144,7 @@
         </div>
       </div>
       <div class="panel" data-panel="curve">
-        <p class="help">Drag the points. Double-click empty space to add a point, or a point to remove it.</p>
+        <p class="help">Drag the points, or set them below. Points also take the arrow keys (Shift for steps of 5) and Delete.</p>
         <div class="presets curve-presets">
           <span class="muted">Start from</span>
           <button data-curve="quiet" title="Homelab, Xeon E5 class CPUs">Quiet</button>
@@ -156,30 +157,17 @@
           <svg id="curve" viewBox="0 0 400 230"></svg>
           <div class="curve-tip" id="curve-tip"></div>
         </div>
+        <div class="curve-points" id="curve-points" aria-label="Curve points"></div>
       </div>
 
       <div class="fields">
         <div class="f">
-          <label for="failsafe">CPU failsafe<small>At or above this, the BMC takes back control</small></label>
+          <label for="failsafe">CPU failsafe<small>At or above this, the BMC takes the fans back</small></label>
           <div class="num"><input type="number" id="failsafe" min="40" max="90" step="1"><span class="muted tu">°C</span></div>
         </div>
         <div class="f">
-          <label for="exhaust-limit">Exhaust air limit<small>Hands over too when the air leaving the server gets this hot. Empty turns it off</small></label>
-          <div class="num"><input type="number" id="exhaust-limit" step="1" placeholder="off"><span class="muted tu">°C</span></div>
-        </div>
-        <div class="f">
-          <label>BMC warning thresholds<small>Hands over when any sensor (PCIe cards, disks, DIMMs…) is within <span id="margin-text">5</span> <span class="tu">°C</span> of the warning level its BMC defines</small></label>
-          <div class="mini" role="group" aria-label="BMC warning thresholds" id="bmc-thr">
-            <button data-thr="true">On</button><button data-thr="false">Off</button>
-          </div>
-        </div>
-        <div class="f">
-          <label for="min-speed">Minimum speed<small>Fans never go below this in fixed, curve and smart modes</small></label>
+          <label for="min-speed">Minimum speed<small>Fans never go below this in fixed, curve and smart modes. Cards without a sensor rely on it</small></label>
           <div class="num"><input type="number" id="min-speed" min="10" max="60" step="1"><span class="muted">%</span></div>
-        </div>
-        <div class="f">
-          <label for="ramp">Ramp-down delay<small>Fans speed up at once, slow down only after lower demand lasts this long</small></label>
-          <div class="num"><input type="number" id="ramp" min="0" max="600" step="5"><span class="muted">s</span></div>
         </div>
         <div class="f quiet-row">
           <label>Quiet hours<small>Caps the fan speed overnight. The failsafe still applies at any hour</small></label>
@@ -190,26 +178,43 @@
             <span class="quiet-fields" id="quiet-fields">
               <input type="time" id="quiet-start" aria-label="Quiet hours start"> –
               <input type="time" id="quiet-end" aria-label="Quiet hours end">
-              <span class="num">max <input type="number" id="quiet-max" min="0" max="100" aria-label="Quiet hours maximum speed"><span class="muted">%</span></span>
+              <span class="num">max <input type="number" id="quiet-max" min="0" max="100" step="1" aria-label="Quiet hours maximum speed"><span class="muted">%</span></span>
             </span>
           </div>
         </div>
-        <div class="f sched-row">
-          <label>Schedule<small>Profiles by day and time: each can cap the speed and change the smart target. The lowest cap and target in force win</small></label>
-          <div class="sched" id="sched"></div>
-        </div>
-        <div class="f">
-          <label>Dry run<small>Decide and log what would be sent, but leave the fans to the BMC</small></label>
-          <div class="mini" role="group" aria-label="Dry run" id="dry">
-            <button data-dry="false">Off</button><button data-dry="true">On</button>
+        <details class="advanced" id="advanced">
+          <summary>More protection and smoothing<small>Exhaust and sensor limits, ramp-down, schedule, dry run</small></summary>
+          <div class="f">
+            <label for="exhaust-limit">Exhaust air limit<small>The BMC takes the fans back when the air leaving the server gets this hot. Empty turns it off</small></label>
+            <div class="num"><input type="number" id="exhaust-limit" min="30" max="90" step="1" placeholder="off"><span class="muted tu">°C</span></div>
           </div>
-        </div>
-        <div class="f" id="pcie-row">
-          <label>Third-party PCIe cards<small>Dell's default cooling response</small></label>
-          <div class="mini" role="group" aria-label="Third-party PCIe cards">
-            <button data-pcie="null">Leave</button><button data-pcie="true">On</button><button data-pcie="false">Off</button>
+          <div class="f">
+            <label>BMC warning thresholds<small data-i18n="thr-help">The BMC takes the fans back when any sensor (PCIe cards, disks, DIMMs…) is within <span id="margin-text">5</span> <span class="tu">°C</span> of the warning level its BMC defines</small></label>
+            <div class="mini" role="group" aria-label="BMC warning thresholds" id="bmc-thr">
+              <button data-thr="false">Off</button><button data-thr="true">On</button>
+            </div>
           </div>
-        </div>
+          <div class="f">
+            <label for="ramp">Ramp-down delay<small>Fans speed up at once, slow down only after lower demand lasts this long</small></label>
+            <div class="num"><input type="number" id="ramp" min="0" max="600" step="1"><span class="muted">s</span></div>
+          </div>
+          <div class="f sched-row">
+            <label>Schedule<small>Profiles by day and time: each can cap the speed and change the smart target. The lowest cap and target in force win</small></label>
+            <div class="sched" id="sched"></div>
+          </div>
+          <div class="f">
+            <label>Dry run<small>Decide and log what would be sent, but leave the fans to the BMC</small></label>
+            <div class="mini" role="group" aria-label="Dry run" id="dry">
+              <button data-dry="false">Off</button><button data-dry="true">On</button>
+            </div>
+          </div>
+          <div class="f" id="pcie-row">
+            <label>Third-party PCIe cards<small>Dell's extra cooling for cards it doesn't know. Off saves noise, but cards without a sensor then rely on the minimum speed</small></label>
+            <div class="mini" role="group" aria-label="Third-party PCIe cards">
+              <button data-pcie="null">Leave</button><button data-pcie="false">Off</button><button data-pcie="true">On</button>
+            </div>
+          </div>
+        </details>
       </div>
 
       <div class="actions">
@@ -256,7 +261,7 @@
       <form class="detect scan" id="sc-form" autocomplete="off">
         <span class="detect-lead">Find BMCs on your network.</span>
         <input id="sc-range" placeholder="192.168.1.0/24" spellcheck="false" aria-label="Network range to scan">
-        <button class="btn" id="sc-go">Scan network</button>
+        <button class="btn primary" id="sc-go">Scan network</button>
       </form>
       <div class="scan-results" id="sc-results" hidden></div>
       <form class="detect" id="d-form" autocomplete="off">
@@ -267,6 +272,7 @@
         <button class="btn" id="d-go">Detect</button>
       </form>
       <div class="result" id="d-result" hidden></div>
+      <p class="or">Or pick the type yourself:</p>
       <div class="tiles" id="e-tiles" role="radiogroup" aria-label="Server type"></div>
     </li>
     <li id="e-step2" hidden>
@@ -312,20 +318,20 @@
       </section>
       <section class="int-step">
         <h2><span class="n">2</span> Add a scrape job</h2>
-        <p>In <code>prometheus.yml</code>. Replace the address if Prometheus reaches this dashboard another way.</p>
+        <p data-i18n="pm-where">In <code>prometheus.yml</code>. Replace the address if Prometheus reaches this dashboard another way.</p>
         <div class="code"><pre id="pm-scrape"></pre><button class="copy" data-copy="pm-scrape">Copy</button></div>
-        <p class="hint">The BMCs are read every <span id="pm-interval"></span> s, so scraping more often than that adds nothing.</p>
+        <p data-i18n="pm-interval" class="hint">The BMCs are read every <span id="pm-interval"></span> s, so scraping more often than that adds nothing.</p>
       </section>
       <section class="int-step">
         <h2><span class="n">3</span> Check it</h2>
-        <p>Prometheus → Status → Targets should show <b>fan-control</b> as <b>UP</b>. Then try
+        <p data-i18n="pm-check">Prometheus → Status → Targets should show <b>fan-control</b> as <b>UP</b>. Then try
           <code>fanctl_cpu_temperature_celsius</code> in the query box.</p>
       </section>
     </div>
     <aside class="int-side">
       <h2>Metrics</h2>
       <table class="metric-table"><tbody id="pm-metrics"></tbody></table>
-      <p class="hint">Every series carries <code>server</code>, <code>name</code> and <code>driver</code> labels.</p>
+      <p data-i18n="pm-labels" class="hint">Every series carries <code>server</code>, <code>name</code> and <code>driver</code> labels.</p>
     </aside>
   </div>
   <section class="int-live">
@@ -347,18 +353,18 @@
     <div class="int-main">
       <section class="int-step">
         <h2><span class="n">1</span> Collect the metrics</h2>
-        <p>The dashboard reads from Prometheus. If it is not scraping this dashboard yet, set that up first on the
+        <p data-i18n="gf-first">The dashboard reads from Prometheus. If it is not scraping this dashboard yet, set that up first on the
           <a href="#/prometheus">Prometheus</a> page.</p>
       </section>
       <section class="int-step">
         <h2><span class="n">2</span> Import</h2>
-        <p>In Grafana: <b>Dashboards → New → Import</b>, upload <code>fan-control.json</code>, and pick your
+        <p data-i18n="gf-import">In Grafana: <b>Dashboards → New → Import</b>, upload <code>fan-control.json</code>, and pick your
           Prometheus data source when asked.</p>
         <a class="btn" href="/static/grafana.json" download="fan-control.json">Download fan-control.json</a>
       </section>
       <section class="int-step">
         <h2><span class="n">3</span> Choose servers</h2>
-        <p>The <b>Server</b> drop-down at the top filters every panel. It lists the servers Prometheus has seen:
+        <p data-i18n="gf-servers">The <b>Server</b> drop-down at the top filters every panel. It lists the servers Prometheus has seen:
           <span id="gf-servers"></span>.</p>
       </section>
     </div>
@@ -401,9 +407,9 @@
         </div>
         <p><a class="btn" id="hm-download" download="fan-control-homarr-widget.json">Download widget</a></p>
         <ol class="int-list">
-          <li>In Homarr, open <b>Management → Custom Widgets</b> and import the file.</li>
-          <li>For the source credential pick <b>Bearer</b> and paste a widget token from step 1. Homarr keeps it encrypted.</li>
-          <li>Edit a board, choose <b>Add board content</b> and pick <b>Fan Control</b>.</li>
+          <li data-i18n="hm-import">In Homarr, open <b>Management → Custom Widgets</b> and import the file.</li>
+          <li data-i18n="hm-bearer">For the source credential pick <b>Bearer</b> and paste a widget token from step 1. Homarr keeps it encrypted.</li>
+          <li data-i18n="hm-board">Edit a board, choose <b>Add board content</b> and pick <b>Fan Control</b>.</li>
         </ol>
       </section>
       <section class="int-step">
@@ -416,11 +422,11 @@
         <div class="share" id="hm-show"></div>
         <div class="code"><pre id="hm-url"></pre><button class="copy" data-copy="hm-url">Copy</button></div>
         <p class="hint">Put in a widget token from step 1. The dashboard keeps only a hash of it, so it shows a token just once.</p>
-        <p>In Homarr, add an <b>iFrame</b> widget and paste the address. Any size works: a short frame drops the chart first, then the footer.</p>
+        <p data-i18n="hm-iframe">In Homarr, add an <b>iFrame</b> widget and paste the address. Any size works: a short frame drops the chart first, then the footer.</p>
       </section>
       <section class="int-step">
         <h2><span class="n hm-n">5</span> App tile status</h2>
-        <p>For an app tile, use this as its status check. It answers <code>200</code> while every BMC answers, and
+        <p data-i18n="hm-health">For an app tile, use this as its status check. It answers <code>200</code> while every BMC answers, and
           <code>503</code> as soon as one stops.</p>
         <div class="code"><pre id="hm-health"></pre><button class="copy" data-copy="hm-health">Copy</button></div>
       </section>

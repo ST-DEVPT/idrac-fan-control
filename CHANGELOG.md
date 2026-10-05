@@ -3,6 +3,34 @@
 Versions follow [semantic versioning](https://semver.org): a major version (`:2`) never removes a setting
 or changes what an existing one does, so pinning the image to it is safe.
 
+## [2.5.0] - 2026-10-05
+
+The dashboard, for people who are not engineers and for phones, from an independent review.
+
+- **The control panel puts the essentials first**: mode, failsafe, minimum speed and quiet hours. Exhaust
+  and sensor limits, ramp-down, schedule, dry run and PCIe cooling sit under *More protection and
+  smoothing*. Help texts say what happens ("the BMC takes the fans back").
+- **Applying a change that reduces cooling asks first** and lists what is reduced: a lower minimum speed,
+  a higher failsafe, a limit turned off, a curve that runs the fans slow when hot.
+- **Out-of-range values are no longer dropped in silence**: the field turns red and says what it accepts.
+- **The fan curve works by touch and keyboard**: every point is also a pair of fields, points can be added
+  and removed with buttons, and a focused point moves with the arrow keys (Shift for steps of 5) or goes
+  with Delete.
+- **Phones**: a compact header that scrolls away (pages and servers each slide sideways), and 40 px touch
+  targets on touch screens.
+- **Contrast meets WCAG AA** in both themes (secondary text, the accent, alerts); the two themes come from
+  one set of colour tokens.
+- **Offline is visible**: a banner says when the dashboard cannot be reached and since when, and the
+  readings below are dimmed. Polling pauses in hidden tabs and never piles up requests.
+- The status dots in the sidebar have text for screen readers, and "hot" means the same everywhere: within
+  5 °C of that server's failsafe. The BMC error box is no longer re-announced every 5 seconds.
+- The chart keeps its crosshair under the pointer across refreshes; resizing redraws once.
+- Leaving the Alerts page with unsaved changes asks first, like the server page.
+- Adding a server leads with the network scan; an empty name becomes the address, never the example.
+- Navigation: Overview, then servers, then settings (Alerts, Prometheus, Grafana, Homarr, Backup).
+- Portuguese: sentences split by links or code are translated whole; the one-word fragments that used to
+  translate any matching text anywhere are gone, and a test keeps it that way.
+
 ## [2.4.0] - 2026-10-05
 
 Security, from an independent review.

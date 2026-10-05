@@ -20,7 +20,7 @@ SAME = {"Fan Control", "Homarr", "Grafana", "Prometheus", "Discord", "ntfy", "Go
 
 def dictionary():
     src = (WEB / "i18n.js").read_text(encoding="utf-8")
-    body = src[src.index("const PT = {"):src.index("const PT_PATTERNS")]
+    body = src[src.index("const PT = {"):src.index("const PT_HTML")]
     keys = {bytes(k, "utf-8").decode("unicode_escape").encode("latin-1").decode("utf-8")
             for k in re.findall(r'"((?:[^"\\]|\\.)+)":', body)}
     pats = src[src.index("const PT_PATTERNS"):src.index("function localize")]
@@ -28,25 +28,65 @@ def dictionary():
     return keys, patterns
 
 
+def html_dictionary():
+    """PT_HTML: whole elements, keyed by data-i18n."""
+    import json
+    src = (WEB / "i18n.js").read_text(encoding="utf-8")
+    block = src[src.index("const PT_HTML = {") + len("const PT_HTML = "):]
+    return json.loads(block[:block.index("};") + 1].rstrip().rstrip(",").replace(",\n}", "\n}").replace(",\n};", "\n}"))
+
+
+INLINE = {"b", "code", "a", "span", "i", "em", "strong", "kbd"}
+
+
 class Texts(HTMLParser):
+    """Text nodes and translatable attributes, as i18n.js sees them. Inside a data-i18n element
+    nothing is collected: the element is translated whole. A paragraph, list item or help text
+    whose sentence is split by inline markup but has no data-i18n is reported as fragmented."""
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.skip, self.found = 0, set()
+        self.skip, self.found, self.whole, self.stack = 0, set(), {}, []
+        self.fragmented, self.whole_depth = [], 0
 
     def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if self.stack:
+            self.stack[-1]["inline"] |= tag in INLINE
+        if self.whole_depth:
+            self.whole_depth += 1
+            if a.get("id"):
+                self.whole[self.cur]["ids"].add(a["id"])
+            return
+        if a.get("data-i18n"):
+            self.cur, self.whole_depth = a["data-i18n"], 1
+            self.whole[self.cur] = {"ids": set()}
+            return
         for k, v in attrs:
             if k in ATTRS and v:
                 self.found.add(v)
         if tag in SKIP:
             self.skip += 1
+        if tag not in ("br", "img", "input", "meta", "link", "hr"):
+            self.stack.append({"tag": tag, "inline": False, "text": 0})
 
     def handle_endtag(self, tag):
+        if self.whole_depth:
+            self.whole_depth -= 1
+            return
         if tag in SKIP:
             self.skip -= 1
+        if self.stack and self.stack[-1]["tag"] == tag:
+            n = self.stack.pop()
+            if n["tag"] in ("p", "li", "small") and n["inline"] and n["text"] >= 2:
+                self.fragmented.append(f"<{tag}> at line {self.getpos()[0]}")
 
     def handle_data(self, data):
+        if self.whole_depth:
+            return
         if not self.skip:
             self.found.add(data)
+            if self.stack and re.search(r"[A-Za-z]{2}", data):
+                self.stack[-1]["text"] += 1
 
 
 def needs(text):
@@ -67,10 +107,21 @@ class Portuguese(unittest.TestCase):
                     missing.setdefault(page, []).append(text)
         self.assertEqual(missing, {}, "add these to PT in web/i18n.js")
 
+    def test_sentences_split_by_markup_are_translated_whole(self):
+        pt_html = html_dictionary()
+        for page in ("index.html", "login.html", "embed.html"):
+            p = Texts()
+            p.feed((WEB / page).read_text(encoding="utf-8"))
+            self.assertEqual(p.fragmented, [], f"{page}: give these a data-i18n key and a PT_HTML entry")
+            for key, info in p.whole.items():
+                self.assertIn(key, pt_html, f"{page}: no PT_HTML for data-i18n={key}")
+                for element_id in info["ids"]:  # the code fills these in: they must survive translation
+                    self.assertIn(f'id="{element_id}"', pt_html[key], f"{key} lost #{element_id}")
+
     def test_no_key_twice(self):
         """A key written twice silently keeps only its last translation."""
         src = (WEB / "i18n.js").read_text(encoding="utf-8")
-        body = src[src.index("const PT = {"):src.index("const PT_PATTERNS")]
+        body = src[src.index("const PT = {"):src.index("const PT_HTML")]
         keys = re.findall(r'"((?:[^"\\]|\\.)+)":', body)
         self.assertEqual(sorted({k for k in keys if keys.count(k) > 1}), [])
 

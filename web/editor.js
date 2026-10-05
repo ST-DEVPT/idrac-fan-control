@@ -58,7 +58,7 @@ function renderEditor() {
   $("#e-host-help").textContent = HOST_HELP[d.kind] || "";
   $("#e-user").placeholder = { dell: "root", supermicro: "ADMIN", "ilo4-unlocked": "Administrator", redfish: "Administrator" }[d.kind] || "admin";
   $("#e-pass").placeholder = editing?.has_password ? "Saved. Type to change" : "";
-  if (!$("#e-name").value && !editing) $("#e-name").placeholder = d.kind === "demo" ? "Demo server" : "Rack A";
+  if (!$("#e-name").value && !editing) $("#e-name").placeholder = d.kind === "demo" ? "Demo server" : translate("e.g. Rack A, or leave empty to use the address");
 }
 
 // a guess at the LAN range, from the address this page was opened on
@@ -148,7 +148,8 @@ $("#e-tiles").addEventListener("click", e => {
 });
 
 function editorBody() {
-  const b = { driver: editDriver, name: $("#e-name").value.trim() || $("#e-name").placeholder,
+  // an empty name becomes the address (or "Demo server"), never the example in the placeholder
+  const b = { driver: editDriver, name: $("#e-name").value.trim() || (editDriver === "demo" ? "Demo server" : $("#e-host").value.trim()),
               host: $("#e-host").value.trim(), username: $("#e-user").value.trim(), verify_tls: $("#e-tls").checked };
   if ($("#e-pass").value) b.password = $("#e-pass").value;
   if (editing) b.id = editing.id;
@@ -180,10 +181,16 @@ $("#e-test").onclick = async () => {
 $("#e-form").onsubmit = async e => {
   e.preventDefault();
   $("#e-save").disabled = true;
-  const r = await api(editing ? "/api/servers/" + encodeURIComponent(editing.id) : "/api/servers", editorBody());
-  const d = await r.json();
-  $("#e-save").disabled = false;
-  if (!r.ok) return toast(d.error, true);
+  let r, d;
+  try {
+    r = await api(editing ? "/api/servers/" + encodeURIComponent(editing.id) : "/api/servers", editorBody());
+    d = await r.json();
+  } catch {  // offline, or a proxy's error page instead of JSON
+    d = { error: translate("Fan Control did not answer. Nothing was saved.") };
+  } finally {
+    $("#e-save").disabled = false;
+  }
+  if (!r?.ok) return toast(d.error, true);
   toast(editing ? "Server updated" : `${d.name} added`);
   await pollOverview();
   location.hash = "#/server/" + encodeURIComponent(d.id);

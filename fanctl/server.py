@@ -535,8 +535,9 @@ class Server:
             hour = [p for p in self.history if p["t"] > now - 3600]
         step = max(1, len(hour) // 60)
         fans = (s["sensors"] or {}).get("fans", [])
+        settings = self.settings()
         return {**self.info(), "model": s["model"], "cpu_temp": s["cpu_temp"], "effective": s["effective"],
-                "mode": self.settings()["mode"],
+                "mode": settings["mode"], "failsafe_temp": settings["failsafe_temp"],
                 "applied_speed": s["applied_speed"], "failsafe": s["failsafe"], "error": s["error"],
                 "dry_run": s["dry_run"], "reason": s["reason"],
                 "power": s["power"], "updated": s["updated"],

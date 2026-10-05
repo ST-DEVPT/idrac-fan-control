@@ -2,54 +2,29 @@
 @font-face { font-family: "IBM Plex Mono"; src: url(/static/fonts/plex-mono-400.woff2) format("woff2"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "IBM Plex Mono"; src: url(/static/fonts/plex-mono-500.woff2) format("woff2"); font-weight: 500; font-display: swap; }
 :root {
-  --bg: #f2f0eb;
-  --surface: #faf9f6;
-  --ink: #171717;
-  --ink-2: #4f4d48;
-  --ink-3: #8a877f;
-  --rule: #dedad1;
-  --rule-2: #c7c2b6;
-  --accent: #e4501b;
-  --accent-soft: #e4501b1a;
-  --cool: #2c6b8a;
-  --ok: #3b7a39;
-  --bad: #c0301c;
-  --hatch: #17171712;
+  /* one set of tokens for both themes: light-dark() picks by color-scheme, which follows the system,
+     or data-theme="light"/"dark" when a page (the embed widget) is told which one to use.
+     Text colours meet WCAG AA (4.5:1) on both backgrounds. */
+  color-scheme: light dark;
+  --bg: light-dark(#f2f0eb, #111110);
+  --surface: light-dark(#faf9f6, #171716);
+  --ink: light-dark(#171717, #ebe9e4);
+  --ink-2: light-dark(#4f4d48, #aaa79f);
+  --ink-3: light-dark(#6b6860, #8f8c84);
+  --rule: light-dark(#dedad1, #272624);
+  --rule-2: light-dark(#c7c2b6, #3a3834);
+  --accent: light-dark(#c2410c, #ff6a33);
+  --accent-soft: light-dark(#c2410c1a, #ff6a3320);
+  --on-accent: light-dark(#ffffff, #111110);
+  --cool: light-dark(#2c6b8a, #6eb0cf);
+  --ok: light-dark(#3b7a39, #7fbf6a);
+  --bad: light-dark(#c0301c, #ff5a43);
+  --hatch: light-dark(#17171712, #ffffff0d);
   --sans: "Archivo", "Helvetica Neue", Helvetica, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #111110;
-    --surface: #171716;
-    --ink: #ebe9e4;
-    --ink-2: #aaa79f;
-    --ink-3: #6f6c65;
-    --rule: #272624;
-    --rule-2: #3a3834;
-    --accent: #ff6a33;
-    --accent-soft: #ff6a3320;
-    --cool: #6eb0cf;
-    --ok: #7fbf6a;
-    --bad: #ff5a43;
-    --hatch: #ffffff0d;
-  }
-}
-:root[data-theme="dark"] {
-    --bg: #111110;
-    --surface: #171716;
-    --ink: #ebe9e4;
-    --ink-2: #aaa79f;
-    --ink-3: #6f6c65;
-    --rule: #272624;
-    --rule-2: #3a3834;
-    --accent: #ff6a33;
-    --accent-soft: #ff6a3320;
-    --cool: #6eb0cf;
-    --ok: #7fbf6a;
-    --bad: #ff5a43;
-    --hatch: #ffffff0d;
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body {
@@ -182,7 +157,7 @@ footer a { color: var(--ink-2); }
 
 .toast { position: fixed; right: 24px; bottom: 24px; background: var(--ink); color: var(--bg); padding: 10px 14px; border-radius: 6px; font-size: 13.5px; opacity: 0; transform: translateY(8px); transition: .2s; pointer-events: none; }
 .toast.show { opacity: 1; transform: none; }
-.toast.error { background: var(--bad); color: #fff; }
+.toast.error { background: var(--bad); color: var(--on-accent); }
 
 @media (max-width: 1440px) {
   .readouts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -376,7 +351,7 @@ body.app { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-heigh
 a.btn { display: inline-flex; align-items: center; text-decoration: none; color: var(--ink); }
 a.btn.primary { color: var(--bg); }
 .btn.danger { color: var(--bad); border-color: var(--bad); }
-.alert { display: none; margin-top: 16px; padding: 10px 14px; border-radius: 7px; background: var(--accent); color: #fff; font-size: 13.5px; }
+.alert { display: none; margin-top: 16px; padding: 10px 14px; border-radius: 7px; background: var(--accent); color: var(--on-accent); font-size: 13.5px; }
 .alert.show { display: block; }
 .alert b { font-weight: 650; margin-right: 8px; }
 .alerts > .hd h2 { display: none; }
@@ -460,17 +435,23 @@ a.btn.primary { color: var(--bg); }
 .monitor-note b { color: var(--ink); }
 
 @media (max-width: 900px) {
+  /* a compact header that scrolls away with the page: two rows, pages then servers, each sliding sideways */
   body.app { display: block; }
   .side {
-    position: sticky; z-index: 10; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center;
-    gap: 4px 6px; padding: 10px 16px; border-right: 0; border-bottom: 1px solid var(--rule);
+    position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center;
+    gap: 6px; padding: 10px 16px 8px; border-right: 0; border-bottom: 1px solid var(--rule);
   }
   .brand { padding: 4px 8px 4px 0; }
   .side-nav { display: flex; }
   .side-label { display: none; }
-  .side-servers { order: 5; width: 100%; display: flex; gap: 4px; overflow-x: auto; }
+  .side-nav { order: 2; }
+  .side-settings { order: 2; flex: 1; min-width: 0; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  .side-foot #version, .side-foot #update { display: none; }
+  .side-settings a { flex-shrink: 0; white-space: nowrap; }
+  .side-servers { order: 3; width: 100%; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
   .side-servers a { flex-shrink: 0; white-space: nowrap; }
-  .side-foot { margin: 0 0 0 auto; padding: 0; border: 0; }
+  .side-foot { margin: 0 0 0 auto; padding: 0; border: 0; order: 1; gap: 6px; }
+  .brand { order: 0; }
   .main { padding: 20px 16px 48px; }
   .page-head h1 { font-size: 32px; }
   .form .two { grid-template-columns: 1fr; }
@@ -594,7 +575,6 @@ body.viewer #control-body, body.viewer .alerts .al-grid, body.viewer .detect { p
 .share label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .share input { accent-color: var(--accent); }
 .builder input { padding: 8px 9px; border: 1px solid var(--rule-2); border-radius: 6px; background: var(--surface); color: var(--ink); font: 13.5px var(--sans); min-width: 0; }
-a.btn { display: inline-block; color: var(--ink); text-decoration: none; }
 .int-list { margin: 10px 0 0; padding-left: 20px; color: var(--ink-2); max-width: 70ch; line-height: 1.7; }
 body.viewer #hm-fields { pointer-events: none; opacity: .6; }
 
@@ -631,3 +611,39 @@ body.viewer #channels { pointer-events: none; opacity: .75; }
 /* a newer release */
 #update { font-size: 12px; color: var(--accent); text-decoration: none; border: 1px solid var(--accent); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 #update:hover { background: var(--accent-soft); }
+
+/* fingers are not mouse pointers: every control gets a 40 px target on touch screens */
+@media (pointer: coarse) {
+  .mini button, .tabs button, .presets button, .inline-btn, .linkish, .side-add, .prof .days button,
+  .side-nav a, .side-servers a, .chips button { min-height: 40px; min-width: 40px; }
+  .mini button, .tabs button { padding-inline: 14px; }
+  .num input, .prof input, input[type=time] { min-height: 40px; }
+  .seg button { min-height: 44px; }
+}
+
+/* the control panel: the essentials first, the rest one tap away */
+.advanced { border-top: 1px solid var(--rule); }
+.advanced > summary { list-style: none; cursor: pointer; padding: 14px 0; display: block;
+  font-weight: 600; font-size: 13.5px; }
+.advanced > summary::-webkit-details-marker { display: none; }
+.advanced > summary::before { content: "+ "; color: var(--ink-3); font-weight: 400; }
+.advanced[open] > summary::before { content: "− "; }
+.advanced > summary small { display: block; font-weight: 400; color: var(--ink-3); font-size: 12px; }
+.field-error { flex-basis: 100%; margin: 4px 0 0; font-size: 12px; color: var(--bad); text-align: right; }
+.field-error:empty { display: none; }
+input[aria-invalid="true"] { border-color: var(--bad) !important; outline-color: var(--bad); }
+
+/* offline: the banner says it, and every reading below looks as old as it is */
+.offline-banner { margin: 0 0 16px; padding: 10px 14px; border-radius: 7px; background: var(--bad); color: var(--on-accent); font-size: 13.5px; }
+body.offline .readouts, body.offline .grid, body.offline .grid3, body.offline .fleet { opacity: .5; filter: grayscale(.6); }
+/* text for screen readers only */
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* curve points as fields */
+.curve-points { display: flex; flex-wrap: wrap; gap: 8px 14px; max-width: 560px; margin-top: 10px; align-items: center; }
+.curve-points .cp { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.curve-points .cp input { width: 58px; }
+.curve-points .arrow { color: var(--ink-3); }
+.curve-box .pt:focus { outline: none; }
+.curve-box .pt:focus-visible circle:last-child { stroke: var(--accent); stroke-width: 3; }
+.or { margin: 14px 0 8px; font-size: 12.5px; color: var(--ink-3); }

@@ -54,8 +54,6 @@ const PT = {
     "O BMC define a velocidade com o perfil de fábrica. Mais ruído, mas sem surpresas. É também para aqui que o controlador recua sempre que algo corre mal.",
   "Every fan at the same speed, as long as the CPU stays below the failsafe temperature.":
     "Todas as ventoinhas à mesma velocidade, enquanto o CPU estiver abaixo da temperatura de segurança.",
-  "Drag the points. Double-click empty space to add a point, or a point to remove it.":
-    "Arraste os pontos. Duplo clique num espaço vazio acrescenta um ponto; num ponto, remove-o.",
   "Start from": "Começar por", "Quiet": "Silenciosa", "Balanced": "Equilibrada", "Cool": "Fresca", "Storage": "Armazenamento",
   "Copy from…": "Copiar de…", "CPU failsafe": "Limite de segurança do CPU",
   "At or above this, the BMC takes back control": "A partir daqui, o BMC retoma o controlo",
@@ -64,7 +62,6 @@ const PT = {
   "BMC warning thresholds": "Limites de aviso do BMC",
   "Hands over when any sensor (PCIe cards, disks, DIMMs…) is within": "Passa o controlo quando qualquer sensor (placas PCIe, discos, DIMMs…) fica a menos de",
   "°C of the warning level its BMC defines": "°C do limite de aviso definido pelo BMC",
-  "of the warning level its BMC defines": "do limite de aviso definido pelo BMC",
   "Minimum speed": "Velocidade mínima", "Fans never go below this in fixed, curve and smart modes": "As ventoinhas nunca descem abaixo disto nos modos fixo, curva e smart",
   "Ramp-down delay": "Atraso a abrandar",
   "Quiet hours": "Horário silencioso", "Caps the fan speed overnight. The failsafe still applies at any hour": "Limita a velocidade durante a noite. O limite de segurança continua ativo a qualquer hora",
@@ -114,14 +111,7 @@ const PT = {
   "BMC password": "Password do BMC", "BMC user": "Utilizador do BMC", "CPU target temperature": "Temperatura alvo do CPU",
   "Copy the curve of another server": "Copiar a curva de outro servidor", "Discord alerts": "Alertas no Discord",
   "Download fan-control.json": "Descarregar fan-control.json",
-  "For an app tile, use this as its status check. It answers": "Para o tile de uma app, use isto como verificação de estado. Responde",
-  "while every BMC answers, and": "enquanto todos os BMC respondem, e", "as soon as one stops.": "assim que um deixa de responder.",
-  "For the source credential pick": "Na credencial da fonte escolha",
-  "and paste a widget token from step 1. Homarr keeps it encrypted.": "e cole um token de widget do passo 1. O Homarr guarda-o encriptado.",
-  "Homelab, Xeon E5 class CPUs": "Homelab, CPUs da classe Xeon E5", "In Homarr, add an": "No Homarr, adicione um",
-  "widget and paste the address. Any size works: a short frame drops the chart first, then the footer.":
-    "e cole o endereço. Qualquer tamanho serve: num frame baixo sai primeiro o gráfico, depois o rodapé.",
-  "In Homarr, open": "No Homarr, abra", "and import the file.": "e importe o ficheiro.", "and pick": "e escolha",
+  "Homelab, Xeon E5 class CPUs": "Homelab, CPUs da classe Xeon E5",
   "Insert a placeholder": "Inserir um campo", "Language": "Idioma", "Learned fan speed by power draw": "Velocidade aprendida por consumo",
   "Main": "Principal", "Many disks or HBAs, which the CPU temperature doesn't show": "Muitos discos ou HBAs, que a temperatura do CPU não mostra",
   "Prometheus reads with a token, so the dashboard password never goes into its config. The token can read the metrics and nothing else.":
@@ -150,12 +140,31 @@ const PT = {
   "The new certificate will be remembered from the next reading": "O certificado novo fica guardado a partir da próxima leitura",
   "Could not accept it": "Não foi possível aceitar", "Sign out every other browser and phone?": "Terminar a sessão em todos os outros browsers e telemóveis?",
   "Every other session is signed out": "Todas as outras sessões foram terminadas", "Could not sign the others out": "Não foi possível terminar as outras sessões",
+  "At or above this, the BMC takes the fans back": "A partir deste valor, o BMC retoma as ventoinhas",
+  "Fans never go below this in fixed, curve and smart modes. Cards without a sensor rely on it":
+    "As ventoinhas nunca descem abaixo disto nos modos fixo, curva e smart. As placas sem sensor dependem disto",
+  "More protection and smoothing": "Mais proteção e suavização", "Exhaust and sensor limits, ramp-down, schedule, dry run":
+    "Limites de saída de ar e sensores, abrandamento, horário, simulação",
+  "The BMC takes the fans back when the air leaving the server gets this hot. Empty turns it off":
+    "O BMC retoma as ventoinhas quando o ar a sair do servidor chega a esta temperatura. Vazio desliga",
+  "Dell's extra cooling for cards it doesn't know. Off saves noise, but cards without a sensor then rely on the minimum speed":
+    "Arrefecimento extra da Dell para placas que não conhece. Desligado poupa ruído, mas as placas sem sensor ficam dependentes da velocidade mínima",
+  "Whole numbers only": "Só números inteiros", "Exhaust air limit turned off": "Limite do ar de saída desligado",
+  "BMC warning thresholds turned off": "Limites de aviso do BMC desligados",
+  "Dell's cooling for third-party PCIe cards turned off": "Arrefecimento da Dell para placas PCIe de terceiros desligado",
+  "Fans at 65 °C": "Ventoinhas a 65 °C", "These changes reduce cooling:": "Estas alterações reduzem o arrefecimento:",
+  "Apply them anyway?": "Aplicar mesmo assim?", "e.g. Rack A, or leave empty to use the address": "p. ex. Rack A, ou vazio para usar o endereço",
+  "Settings": "Definições",
+  "Curve point": "Ponto da curva", "Point": "Ponto", "temperature": "temperatura", "fan speed": "velocidade",
+  "Remove point": "Remover ponto", "Add a point": "Adicionar ponto", "Curve points": "Pontos da curva",
+  "Drag the points, or set them below. Points also take the arrow keys (Shift for steps of 5) and Delete.":
+    "Arraste os pontos ou defina-os em baixo. Os pontos também aceitam as setas (Shift para passos de 5) e Delete.",
+  "Discard unsaved changes?": "Descartar as alterações por guardar?",
+  "Fan Control did not answer. Nothing was saved.": "O Fan Control não respondeu. Nada foi guardado.",
+  "Or pick the type yourself:": "Ou escolha o tipo à mão:",
   "Not sure? Let the BMC tell you.": "Não tem a certeza? Pergunte ao BMC.", "Detect": "Detetar",
   "Find BMCs on your network.": "Procure BMCs na sua rede.", "Scan network": "Procurar na rede", "Network range to scan": "Gama de rede a procurar",
   "Answers": "Responde a", "Suggested": "Sugestão", "Use": "Usar", "Added": "Adicionado", "Unknown": "Desconhecido",
-  "Pick the hardware you have, or": "Escolha o hardware que tem, ou", "scan your network": "procure na sua rede",
-  "for BMCs. Dell iDRAC and Supermicro get full fan control; HPE iLO and other Redfish or IPMI servers are monitored, with history, alerts and Grafana.":
-    "BMCs. Dell iDRAC e Supermicro têm controlo total das ventoinhas; HPE iLO e outros servidores Redfish ou IPMI são monitorizados, com histórico, alertas e Grafana.",
   "BMC address": "Endereço do BMC", "user (optional)": "utilizador (opcional)", "password (optional)": "palavra-passe (opcional)",
   "Verify the TLS certificate": "Verificar o certificado TLS",
   "(leave off for the self-signed certificates BMCs ship with)": "(deixe desligado para os certificados autoassinados que os BMCs trazem)",
@@ -172,18 +181,10 @@ const PT = {
   "Metrics": "Métricas", "Live output": "Saída ao vivo", "Refresh": "Atualizar", "Filter, e.g. cpu": "Filtrar, ex.: cpu",
   "Metrics need a token, so that the dashboard password never has to go into Prometheus. Add one to":
     "As métricas precisam de um token, para a palavra-passe do painel nunca ir parar ao Prometheus. Acrescente um ao",
-  "and recreate the container:": "e recrie o contentor:", "In": "No",
-  ". Replace the address if Prometheus reaches this dashboard another way.": ". Troque o endereço se o Prometheus chegar a este painel por outro caminho.",
-  "The BMCs are read every": "Os BMCs são lidos a cada", "s, so scraping more often than that adds nothing.": "s, por isso recolher mais vezes não acrescenta nada.",
-  "Prometheus → Status → Targets should show": "Prometheus → Status → Targets deve mostrar", "as": "como", ". Then try": ". Depois experimente",
-  "in the query box.": "na caixa de consulta.", "Every series carries": "Todas as séries têm as etiquetas", "and": "e", "labels.": ".",
+  "and recreate the container:": "e recrie o contentor:",
   "A ready-made dashboard for the Prometheus metrics: temperatures, fan speeds, power and who controls the fans.":
     "Um dashboard pronto para as métricas do Prometheus: temperaturas, ventoinhas, consumo e quem controla as ventoinhas.",
   "Download dashboard": "Descarregar dashboard", "Collect the metrics": "Recolher as métricas", "Import": "Importar", "Choose servers": "Escolher servidores",
-  "The dashboard reads from Prometheus. If it is not scraping this dashboard yet, set that up first on the":
-    "O dashboard lê do Prometheus. Se ainda não estiver a recolher deste painel, configure isso primeiro na página",
-  "page.": ".", "In Grafana:": "No Grafana:", ", upload": ", carregue", ", and pick your Prometheus data source when asked.": " e escolha a fonte de dados Prometheus quando lhe for pedida.",
-  "The": "O menu", "drop-down at the top filters every panel. It lists the servers Prometheus has seen:": "no topo filtra todos os painéis. Lista os servidores que o Prometheus já viu:",
   "What is inside": "O que inclui", "Number": "Número", "Chart": "Gráfico",
   "A read-only widget for Homarr or any dashboard that can show a web page, plus a status check for app tiles.":
     "Um widget só de leitura para o Homarr ou qualquer dashboard que mostre uma página web, e uma verificação de estado para tiles de apps.",
@@ -247,6 +248,25 @@ const PT = {
   "Simulated readings, to try the dashboard without hardware.": "Leituras simuladas, para experimentar o painel sem hardware.",
 };
 
+// Whole elements whose sentence is split by inline markup (<b>, <code>, <a>), keyed by their
+// data-i18n attribute: translating such a sentence piece by piece cannot work in another language.
+const PT_HTML = {
+  "add-lede": "Escolha o hardware que tem, ou <a href=\"#/add\">procure na sua rede</a> BMCs. Dell iDRAC e Supermicro têm controlo total das ventoinhas; HPE iLO e outros servidores Redfish ou IPMI são monitorizados, com histórico, alertas e Grafana.",
+  "thr-help": "O BMC retoma as ventoinhas quando algum sensor (placas PCIe, discos, DIMMs…) fica a <span id=\"margin-text\">5</span> <span class=\"tu\">°C</span> do nível de aviso definido pelo seu BMC",
+  "pm-where": "No <code>prometheus.yml</code>. Mude o endereço se o Prometheus chegar a este painel por outro caminho.",
+  "pm-interval": "Os BMCs são lidos a cada <span id=\"pm-interval\"></span> s, por isso recolher mais vezes não acrescenta nada.",
+  "pm-check": "Prometheus → Status → Targets deve mostrar <b>fan-control</b> como <b>UP</b>. Depois experimente <code>fanctl_cpu_temperature_celsius</code> na caixa de consulta.",
+  "pm-labels": "Todas as séries têm as etiquetas <code>server</code>, <code>name</code> e <code>driver</code>.",
+  "gf-first": "O dashboard lê do Prometheus. Se ainda não estiver a recolher deste painel, configure isso primeiro na página <a href=\"#/prometheus\">Prometheus</a>.",
+  "gf-import": "No Grafana: <b>Dashboards → New → Import</b>, carregue o <code>fan-control.json</code> e escolha a fonte de dados Prometheus quando for pedida.",
+  "gf-servers": "O menu <b>Server</b> no topo filtra todos os painéis. Mostra os servidores que o Prometheus já viu: <span id=\"gf-servers\"></span>.",
+  "hm-import": "No Homarr, abra <b>Management → Custom Widgets</b> e importe o ficheiro.",
+  "hm-bearer": "Na credencial da fonte escolha <b>Bearer</b> e cole um token de widget do passo 1. O Homarr guarda-o encriptado.",
+  "hm-board": "Edite um board, escolha <b>Add board content</b> e selecione <b>Fan Control</b>.",
+  "hm-iframe": "No Homarr, adicione um widget <b>iFrame</b> e cole o endereço. Qualquer tamanho serve: num frame baixo sai primeiro o gráfico, depois o rodapé.",
+  "hm-health": "Para o tile de uma app, use isto como verificação de estado. Responde <code>200</code> enquanto todos os BMC respondem e <code>503</code> assim que um deixa de responder.",
+};
+
 const PT_PATTERNS = [
   [/^Read (\d+) s ago$/, "Lido há $1 s"],
   [/^(\d+) servers?$/, (m, n) => `${n} servidor${n === "1" ? "" : "es"}`],
@@ -286,7 +306,8 @@ const PT_PATTERNS = [
   [/^The settings file was corrupt and was kept aside; .+$/, "O ficheiro de definições estava corrompido e foi guardado à parte; o BMC controla as ventoinhas até aplicar as definições de novo"],
   [/^Saved settings are invalid \((.+)\); the BMC controls the fans$/, "As definições guardadas são inválidas ($1); o BMC controla as ventoinhas"],
   [/^The BMC's warning thresholds could not be read; .+$/, "Não foi possível ler os limites de aviso do BMC; a proteção segue os limites do CPU e da saída de ar até ser possível (nova tentativa a cada 10 min)"],
-  [/^Started: (.+)$/, "Iniciado: $1"], [/^v(.+) available$/, "v$1 disponível"], [/^Could not save: (.+)$/, "Não foi possível guardar: $1"],
+  [/^Started: (.+)$/, "Iniciado: $1"],
+  [/^Can't reach Fan Control\. Readings below are from (.+)\.$/, "Sem ligação ao Fan Control. As leituras abaixo são das $1."], [/^Between (.+) and (.+)$/, "Entre $1 e $2"], [/^v(.+) available$/, "v$1 disponível"], [/^Could not save: (.+)$/, "Não foi possível guardar: $1"],
   [/^Test "(.+)" sent to (ntfy|gotify|webhook)$/, "Teste \"$1\" enviado para $2"],
   [/^Revoke (.+)\? Whatever uses it stops working\.$/, "Revogar $1? O que o usa deixa de funcionar."],
   [/^Fan (.+) failed: (.+)$/, "Ventoinha $1 avariada: $2"], [/^Fan (.+) is spinning again$/, "A ventoinha $1 voltou a rodar"],
@@ -338,6 +359,12 @@ function translateNode(node) {
     return;
   }
   if (node.nodeType !== Node.ELEMENT_NODE || SKIP.has(node.nodeName) && node.nodeName !== "INPUT") return;
+  if (node.dataset.i18n) {  // a sentence split by markup: replaced whole, never word by word
+    if (!original.has(node)) original.set(node, node.innerHTML);
+    const want = (PREFS.lang === "pt" && PT_HTML[node.dataset.i18n]) || original.get(node);
+    if (node.innerHTML !== want) node.innerHTML = want;
+    return;
+  }
   for (const attr of ["placeholder", "title", "aria-label"]) {
     if (!node.hasAttribute(attr)) continue;
     const key = "data-en-" + attr;

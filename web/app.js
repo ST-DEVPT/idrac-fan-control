@@ -32,6 +32,9 @@ function curveSpeed(curve, temp) {
 }
 
 // What a server is doing, in a few words and a colour, for cards, the sidebar and headers.
+// one rule for "hot" everywhere: within 5 °C of the server's own failsafe
+const hot = (cpu, failsafe) => cpu != null && failsafe != null && cpu >= failsafe - 5;
+
 function status(x) {
   if (x.error) return { cls: "bad", text: "Unreachable" };
   if (!x.updated) return { cls: "", text: "Connecting…" };
@@ -52,11 +55,16 @@ function parseRoute() {
   return { view: "overview" };
 }
 
+// Pages with unsaved changes register here; leaving one asks first, and so does closing the tab.
+const unsaved = { server: () => dirty, alerts: () => typeof aDirty !== "undefined" && aDirty };
+const discard = { server: () => { dirty = false; }, alerts: () => { aDirty = false; } };
+
 function go() {
   const next = parseRoute();
-  if (dirty && route.view === "server" && (next.view !== "server" || next.id !== route.id)) {
-    if (!confirm("Discard unsaved fan settings?")) { history.back(); return; }
-    dirty = false;
+  const leaving = next.view !== route.view || next.id !== route.id;
+  if (leaving && unsaved[route.view]?.()) {
+    if (!confirm(translate("Discard unsaved changes?"))) { history.back(); return; }
+    discard[route.view]();
   }
   if (next.view === "server" && next.id !== route.id) { server = null; draft = null; }
   route = next;
@@ -91,7 +99,19 @@ async function pollOverview() {
     }
     renderSide();
     if (route.view === "overview") renderOverview();
-  } catch { /* the server view shows the connection state */ }
+    offline(false);
+  } catch {
+    offline(true);
+  }
+}
+
+// When the dashboard cannot be reached, everything on screen is the past: say so, and dim it.
+let lastContact = Date.now();
+function offline(down) {
+  if (!down) lastContact = Date.now();
+  document.body.classList.toggle("offline", down);
+  $("#offline").hidden = !down;
+  if (down) $("#offline").textContent = `Can't reach Fan Control. Readings below are from ${time(lastContact / 1000)}.`;
 }
 
 async function pollServer() {
@@ -107,9 +127,11 @@ async function pollServer() {
     server = s;
     if (!dirty) draft = structuredClone(server.settings);
     renderServer();
+    offline(false);
   } catch {
     $("#dot-link").className = "dot bad";
     $("#link").textContent = "Dashboard offline";
+    offline(true);
   }
 }
 
@@ -119,7 +141,7 @@ function renderSide() {
   $("#side-servers").innerHTML = overview.servers.map(x => {
     const st = status(x);
     return `<a href="#/server/${encodeURIComponent(x.id)}" aria-current="${route.view === "server" && route.id === x.id}">
-      <span class="dot ${st.cls}"></span><span class="nm">${esc(x.name)}</span>
+      <span class="dot ${st.cls}" aria-hidden="true"></span><span class="nm">${esc(x.name)}</span><span class="sr">, ${esc(translate(st.text))}</span>
       <span class="t">${x.cpu_temp == null ? "" : fmt(tv(x.cpu_temp)) + "°"}</span></a>`;
   }).join("") || '<p class="side-empty">No servers yet</p>';
 }
@@ -157,7 +179,7 @@ function card(x) {
     <div class="card-top"><span class="dot ${st.cls}"></span><b>${esc(x.name)}</b><span class="vendor">${esc(x.vendor)}</span></div>
     <div class="card-sub">${esc(x.model || x.driver_label)}${x.host ? " · " + esc(x.host) : ""}</div>
     <div class="card-main">
-      <div class="big${x.cpu_temp != null && x.cpu_temp >= 70 ? " hot" : ""}">${unit(tv(x.cpu_temp), tu())}</div>
+      <div class="big${hot(x.cpu_temp, x.failsafe_temp) ? " hot" : ""}">${unit(tv(x.cpu_temp), tu())}</div>
       <dl><div><dt>Fans</dt><dd>${fans}</dd></div><div><dt>Power</dt><dd>${x.watts == null ? "—" : fmt(x.watts) + " W"}</dd></div>
         <div><dt>Inlet</dt><dd>${x.inlet == null ? "—" : fmt(tv(x.inlet)) + " " + tu()}</dd></div></dl>
     </div>
@@ -317,6 +339,8 @@ function renderControls() {
   $$(".tu").forEach(el => el.textContent = tu());
   renderSmart();
   $("#fixed-out").innerHTML = `${draft.fixed_speed}<small> %</small>`;
+  $("#failsafe").min = Math.round(tv(40)); $("#failsafe").max = Math.round(tv(90));
+  $("#exhaust-limit").min = Math.round(tv(30)); $("#exhaust-limit").max = Math.round(tv(90));
   if (document.activeElement !== $("#failsafe")) $("#failsafe").value = Math.round(tv(draft.failsafe_temp));
   if (document.activeElement !== $("#ramp")) $("#ramp").value = draft.ramp_down_seconds;
   if (document.activeElement !== $("#min-speed")) $("#min-speed").value = draft.min_speed;
@@ -437,7 +461,25 @@ $("#exhaust-limit").oninput = e => {
   if (raw === "") { draft.exhaust_limit = null; touch(); } else if (v >= 30 && v <= 90) { draft.exhaust_limit = v; touch(); }
 };
 $("#discard").onclick = () => { dirty = false; draft = structuredClone(server.settings); renderServer(); };
+// Changes that leave the server with less cooling than before are spelled out and confirmed.
+function coolingCuts(before, after) {
+  const cuts = [], t = v => `${fmt(tv(v))} ${tu()}`;
+  const at65 = s => s.mode === "fixed" ? s.fixed_speed : s.mode === "curve" ? curveSpeed(s.curve, 65) : null;
+  if (after.min_speed < before.min_speed && after.min_speed < 20)
+    cuts.push(`${translate("Minimum speed")} ${before.min_speed} % → ${after.min_speed} %`);
+  if (after.failsafe_temp >= before.failsafe_temp + 3)
+    cuts.push(`${translate("CPU failsafe")} ${t(before.failsafe_temp)} → ${t(after.failsafe_temp)}`);
+  if (before.exhaust_limit != null && after.exhaust_limit == null) cuts.push(translate("Exhaust air limit turned off"));
+  if (before.bmc_thresholds && !after.bmc_thresholds) cuts.push(translate("BMC warning thresholds turned off"));
+  if (before.pcie_cooling !== false && after.pcie_cooling === false) cuts.push(translate("Dell's cooling for third-party PCIe cards turned off"));
+  const was = at65(before), now = at65(after);
+  if (now != null && now < 30 && (was == null || now < was - 5)) cuts.push(`${translate("Fans at 65 °C")}: ${now} %`);
+  return cuts;
+}
+
 $("#save").onclick = async () => {
+  const cuts = coolingCuts(server.settings, draft);
+  if (cuts.length && !confirm(`${translate("These changes reduce cooling:")}\n\n• ${cuts.join("\n• ")}\n\n${translate("Apply them anyway?")}`)) return;
   $("#save").disabled = true;
   try {
     const r = await api("/api/settings?server=" + encodeURIComponent(server.id), draft);
@@ -452,6 +494,23 @@ $("#save").onclick = async () => {
     $("#save").disabled = false;
   }
 };
+
+// A number outside its range is never dropped in silence: the field says what it accepts.
+$(".fields").addEventListener("input", e => {
+  const el = e.target;
+  if (el.type !== "number") return;
+  const bad = el.value !== "" && !el.checkValidity();
+  el.setAttribute("aria-invalid", bad);
+  const f = el.closest(".f, .prof");
+  let msg = f.querySelector(".field-error");
+  if (!msg) {
+    msg = Object.assign(document.createElement("p"), { className: "field-error" });
+    msg.setAttribute("role", "status");
+    f.append(msg);
+  }
+  msg.textContent = bad ? (el.validity.stepMismatch ? translate("Whole numbers only")
+    : `Between ${el.min} and ${el.max}`) : "";
+});
 
 // ---------------------------------------------------------------- curve presets
 const CURVES = {
@@ -508,9 +567,74 @@ function renderCurve() {
       <circle class="now" cx="${cx(now)}" cy="${cy(sp)}" r="4"/>
       <text x="${cx(now) + 7}" y="${cy(sp) + 14}" style="fill:var(--accent)">${fmt(tv(now))}° → ${sp}%</text>`;
   }
-  draft.curve.forEach((p, i) => g += `<g class="pt" data-i="${i}"><circle cx="${cx(p[0])}" cy="${cy(p[1])}" r="13" fill="transparent"/><circle cx="${cx(p[0])}" cy="${cy(p[1])}" r="4.5"/></g>`);
+  draft.curve.forEach((p, i) => g += `<g class="pt" data-i="${i}" tabindex="0" role="slider" aria-valuenow="${p[1]}"
+      aria-valuetext="${fmt(tv(p[0]))} ${tu()}, ${p[1]} %" aria-label="${translate("Curve point")} ${i + 1}">
+      <circle cx="${cx(p[0])}" cy="${cy(p[1])}" r="13" fill="transparent"/><circle cx="${cx(p[0])}" cy="${cy(p[1])}" r="4.5"/></g>`);
   $("#curve").innerHTML = g;
+  if (focusPoint != null) $(`#curve .pt[data-i="${focusPoint}"]`)?.focus();
+  renderCurvePoints();
 }
+
+// The same points as plain fields: what touch screens and keyboards use, and exact values for anyone.
+function renderCurvePoints() {
+  const box = $("#curve-points");
+  if (box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;
+  box.innerHTML = draft.curve.map((p, i) => `<div class="cp" data-i="${i}">
+      <span class="num"><input type="number" data-k="0" value="${Math.round(tv(p[0]))}" min="${Math.round(tv(T_MIN))}" max="${Math.round(tv(T_MAX))}" step="1"
+        aria-label="${translate("Point")} ${i + 1}: ${translate("temperature")}"><span class="muted">${tu()}</span></span>
+      <span class="arrow" aria-hidden="true">→</span>
+      <span class="num"><input type="number" data-k="1" value="${p[1]}" min="0" max="100" step="1"
+        aria-label="${translate("Point")} ${i + 1}: ${translate("fan speed")}"><span class="muted">%</span></span>
+      <button type="button" class="inline-btn" data-del ${draft.curve.length <= 2 ? "disabled" : ""} aria-label="${translate("Remove point")} ${i + 1}">×</button>
+    </div>`).join("") +
+    (draft.curve.length < 10 ? `<button type="button" class="inline-btn" id="cp-add">${translate("Add a point")}</button>` : "");
+}
+let focusPoint = null;
+$("#curve-points").addEventListener("change", e => {
+  const row = e.target.closest(".cp"), k = e.target.dataset.k;
+  if (!row || k == null || !e.target.checkValidity() || e.target.value === "") return;
+  const i = +row.dataset.i, v = +e.target.value;
+  draft.curve[i] = k === "0" ? [Math.round(fromT(v)), draft.curve[i][1]] : [draft.curve[i][0], Math.round(v)];
+  draft.curve.sort((a, b) => a[0] - b[0]);
+  touch();
+});
+$("#curve-points").addEventListener("click", e => {
+  if (e.target.id === "cp-add") {
+    // halfway along the widest gap, at the speed the curve already gives there
+    const pts = [...draft.curve].sort((a, b) => a[0] - b[0]);
+    let best = [pts[pts.length - 1][0], Math.min(T_MAX, pts[pts.length - 1][0] + 10)];
+    for (let n = 1; n < pts.length; n++) if (pts[n][0] - pts[n - 1][0] > best[1] - best[0]) best = [pts[n - 1][0], pts[n][0]];
+    const t = Math.round((best[0] + best[1]) / 2);
+    draft.curve = [...pts, [t, curveSpeed(pts, t)]].sort((a, b) => a[0] - b[0]);
+    return touch();
+  }
+  const del = e.target.closest("[data-del]");
+  if (del && draft.curve.length > 2) {
+    draft.curve.splice(+del.closest(".cp").dataset.i, 1);
+    touch();
+  }
+});
+$("#curve").addEventListener("keydown", e => {
+  const g = e.target.closest(".pt");
+  if (!g) return;
+  const i = +g.dataset.i, step = e.shiftKey ? 5 : 1;
+  const [t, s] = draft.curve[i];
+  const moves = { ArrowUp: [t, s + step], ArrowDown: [t, s - step], ArrowRight: [t + step, s], ArrowLeft: [t - step, s] };
+  if (moves[e.key]) {
+    e.preventDefault();
+    draft.curve[i] = [clamp(moves[e.key][0], T_MIN, T_MAX), clamp(moves[e.key][1], 0, 100)];
+  } else if ((e.key === "Delete" || e.key === "Backspace") && draft.curve.length > 2) {
+    e.preventDefault();
+    draft.curve.splice(i, 1);
+    focusPoint = null;
+    return touch();
+  } else return;
+  const moved = draft.curve[i];
+  draft.curve.sort((a, b) => a[0] - b[0]);
+  focusPoint = draft.curve.indexOf(moved);
+  touch();
+});
+$("#curve").addEventListener("focusout", e => { if (!e.relatedTarget?.closest?.("#curve .pt")) focusPoint = null; });
 
 function svgPoint(e) {
   const r = $("#curve").getBoundingClientRect();
@@ -623,11 +747,17 @@ function renderChart() {
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.innerHTML = g;
   chart = { h, x, yT, yS, W, pl, pr, fanKey };
+  if (hoverX != null) showPoint(hoverX);  // a redraw every 5 s must not take the crosshair from under the pointer
 }
 
+let hoverX = null;
 $("#chart").addEventListener("pointermove", e => {
+  hoverX = e.clientX - $("#chart").getBoundingClientRect().left;
+  showPoint(hoverX);
+});
+function showPoint(mx) {
   if (!chart || !chart.h.length) return;
-  const r = $("#chart").getBoundingClientRect(), mx = e.clientX - r.left;
+  const r = $("#chart").getBoundingClientRect();
   const p = chart.h.reduce((a, b) => Math.abs(chart.x(b.t) - mx) < Math.abs(chart.x(a.t) - mx) ? b : a);
   const X = chart.x(p.t), cross = $("#cross"), [line, c1, c2] = cross.children, fan = p[chart.fanKey];
   cross.style.display = "";
@@ -643,8 +773,13 @@ $("#chart").addEventListener("pointermove", e => {
     <div><span>Power</span><span>${fmt(p.watts)} W</span></div>`;
   tip.style.display = "block";
   tip.style.left = (X > r.width / 2 ? X - tip.offsetWidth - 14 : X + 14) + "px";
+}
+$("#chart").addEventListener("pointerleave", () => {
+  hoverX = null;
+  $("#tip").style.display = "none";
+  const c = $("#cross");
+  if (c) c.style.display = "none";
 });
-$("#chart").addEventListener("pointerleave", () => { $("#tip").style.display = "none"; const c = $("#cross"); if (c) c.style.display = "none"; });
 
 // ---------------------------------------------------------------- shell
 $$(".tu").forEach(el => el.textContent = tu());  // static unit labels; the unit only changes with a reload
@@ -664,11 +799,29 @@ $("#accept-cert").onclick = async () => {
   toast(r.ok ? "The new certificate will be remembered from the next reading" : "Could not accept it", !r.ok);
 };
 
-addEventListener("resize", () => { if (route.view === "server" && server) renderServer(); });
-addEventListener("beforeunload", e => { if (dirty || (typeof aDirty !== "undefined" && aDirty)) e.preventDefault(); });
+let resizing;
+addEventListener("resize", () => {  // once the window settles, not on every pixel of a drag
+  clearTimeout(resizing);
+  resizing = setTimeout(() => { if (route.view === "server" && server) renderServer(); }, 150);
+});
+addEventListener("beforeunload", e => { if (Object.values(unsaved).some(f => f())) e.preventDefault(); });
 
 route = parseRoute();
 // after every script has run: the first route may be a page that integrations.js draws
 addEventListener("DOMContentLoaded", () => pollOverview().then(go));
-setInterval(pollOverview, 5000);
-setInterval(pollServer, 5000);
+// Polling: never two requests of a kind at once (a slow BMC must not pile them up), and nothing at
+// all while the tab is hidden; coming back refreshes at once.
+function every(ms, fn) {
+  let busy = false;
+  const tick = async () => {
+    if (!document.hidden && !busy) {
+      busy = true;
+      try { await fn(); } finally { busy = false; }
+    }
+    setTimeout(tick, ms);
+  };
+  setTimeout(tick, ms);
+}
+every(5000, pollOverview);
+every(5000, pollServer);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { pollOverview(); pollServer(); } });
