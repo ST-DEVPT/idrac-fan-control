@@ -322,8 +322,56 @@ function renderControls() {
   $("#save").disabled = $("#discard").disabled = !dirty;
   $("#save-state").textContent = dirty ? "Unsaved changes" : "No changes";
   $("#save-state").className = "state" + (dirty ? " dirty" : "");
+  renderSchedule();
   if (drag == null) renderCurve();
 }
+
+// ---------------------------------------------------------------- schedule
+const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+function renderSchedule() {
+  const box = $("#sched");
+  if (box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;  // don't redraw under the cursor
+  box.innerHTML = draft.schedule.map((p, i) => `<div class="prof" data-i="${i}">
+      <input class="p-name" data-k="name" value="${esc(p.name)}" maxlength="30" aria-label="Profile name">
+      <span class="days">${DAY_NAMES.map((d, n) => `<button type="button" data-day="${n}" aria-pressed="${p.days.includes(n)}" title="${translate(d)}">${translate(d)[0]}</button>`).join("")}</span>
+      <input type="time" data-k="start" value="${p.start}" aria-label="Start"> –
+      <input type="time" data-k="end" value="${p.end}" aria-label="End">
+      <span class="num">max <input type="number" data-k="max_speed" min="0" max="100" value="${p.max_speed ?? ""}" placeholder="—" aria-label="Maximum speed"><span class="muted">%</span></span>
+      <span class="num">${translate("target")} <input type="number" data-k="smart_target" value="${p.smart_target == null ? "" : Math.round(tv(p.smart_target))}" placeholder="—" aria-label="Smart target"><span class="muted">${tu()}</span></span>
+      <button type="button" class="inline-btn" data-del aria-label="Remove profile">×</button>
+    </div>`).join("") + (draft.schedule.length < 8 ? `<button type="button" class="inline-btn" id="sched-add">${translate("Add a profile")}</button>` : "");
+}
+$("#sched").addEventListener("click", e => {
+  if (e.target.id === "sched-add") {
+    draft.schedule = [...draft.schedule, { name: translate("Weekend"), days: [5, 6], start: "00:00", end: "00:00", max_speed: 30, smart_target: null }];
+    return touch();
+  }
+  const row = e.target.closest(".prof");
+  if (!row) return;
+  const i = +row.dataset.i, p = { ...draft.schedule[i] };
+  if (e.target.dataset.day != null) {
+    const d = +e.target.dataset.day;
+    p.days = p.days.includes(d) ? p.days.filter(x => x !== d) : [...p.days, d].sort();
+  } else if (e.target.dataset.del != null) {
+    draft.schedule = draft.schedule.filter((_, n) => n !== i);
+    return touch();
+  } else return;
+  draft.schedule = draft.schedule.map((q, n) => n === i ? p : q);
+  touch();
+});
+$("#sched").addEventListener("input", e => {
+  const row = e.target.closest(".prof"), k = e.target.dataset.k;
+  if (!row || !k) return;
+  const i = +row.dataset.i, raw = e.target.value.trim();
+  const v = k === "name" ? e.target.value : k === "start" || k === "end" ? raw
+    : raw === "" ? null : k === "smart_target" ? fromT(+raw) : +raw;
+  if (v === "" && (k === "start" || k === "end")) return;
+  draft.schedule = draft.schedule.map((q, n) => n === i ? { ...q, [k]: v } : q);
+  dirty = true;
+  $("#save").disabled = $("#discard").disabled = false;
+  $("#save-state").textContent = "Unsaved changes";
+  $("#save-state").className = "state dirty";
+});
 function touch() { dirty = true; renderControls(); }
 
 // smart mode: what it is doing now, and the map it has learned of this server

@@ -120,6 +120,17 @@ class Checks(unittest.TestCase):
         self.assertFalse(srv.ignored)
 
 
+class Scheduled(unittest.TestCase):
+    def test_profile_caps_the_speed(self):
+        srv = Recorder("scheduled")
+        always = {"name": "Night", "days": list(range(7)), "start": "00:00", "end": "00:00", "max_speed": 15, "smart_target": None}
+        write_json(srv.settings_file, {"mode": "fixed", "fixed_speed": 50, "schedule": [always]})
+        srv.cycle()
+        self.assertEqual(srv.calls, [15])
+        self.assertTrue(srv.state["reason"].endswith(", Night cap 15%"))
+        srv.settings_file.unlink()
+
+
 class Recorder(Server):
     """A demo server whose fan commands are recorded."""
     def __init__(self, sid):

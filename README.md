@@ -225,6 +225,11 @@ during the whole delay. It never runs the fans slower than the curve. Smart mode
 **Quiet hours** cap the speed between two times of day, for example 23:00 to 07:00 at 25 %. Protection
 still applies at any hour.
 
+**Schedule**: up to 8 profiles by day and time, each with a speed cap, a smart mode target, or both. For
+example *Weekend*, Saturday and Sunday all day, at most 30 %; or *Office hours*, Monday to Friday 09:00 to
+18:00, smart target 55 °C. A profile from 22:00 to 06:00 runs into the next morning; 00:00 to 00:00 is the
+whole day. When several are in force, the lowest cap and the lowest target win, together with quiet hours.
+
 ### A starting point
 
 For a quiet homelab server with Xeon E5 processors, the **Quiet** preset (35 °C → 12 %, 45 → 15, 55 → 22,

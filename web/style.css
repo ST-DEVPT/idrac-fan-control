@@ -615,3 +615,15 @@ body.viewer #hm-fields { pointer-events: none; opacity: .6; }
 .ch .fld input { width: 100%; box-sizing: border-box; }
 @media (max-width: 900px) { .ch-grid { grid-template-columns: 1fr; } }
 body.viewer #channels { pointer-events: none; opacity: .75; }
+
+/* schedule */
+.sched-row { flex-wrap: wrap; }
+.sched { display: grid; gap: 8px; justify-items: end; }
+.prof { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.prof input { padding: 4px 6px; border: 1px solid var(--rule-2); border-radius: 5px; background: var(--surface); color: var(--ink); font: 13px var(--sans); }
+.prof .p-name { width: 96px; }
+.prof .num input { width: 50px; }
+.prof .days { display: inline-flex; border: 1px solid var(--rule-2); border-radius: 5px; overflow: hidden; }
+.prof .days button { border: 0; background: transparent; color: var(--ink-3); width: 22px; padding: 4px 0; font-size: 12px; }
+.prof .days button + button { border-left: 1px solid var(--rule); }
+.prof .days button[aria-pressed=true] { background: var(--ink); color: var(--bg); }

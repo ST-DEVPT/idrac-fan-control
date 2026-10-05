@@ -21,6 +21,10 @@ DEFAULT_SETTINGS = {
     # quiet hours: cap the manual fan speed between start and end (local time). The failsafe still
     # hands control to the BMC whatever the hour.
     "quiet": {"enabled": False, "start": "23:00", "end": "07:00", "max_speed": 25},
+    # profiles by day and time: each may cap the speed and/or change the smart mode target, e.g.
+    # {"name": "Weekend", "days": [5, 6], "start": "00:00", "end": "00:00", "max_speed": 30, "smart_target": 65}
+    # days: 0 = Monday. start == end means the whole day. Overlapping profiles: the lowest cap and target win.
+    "schedule": [],
 }
 
 
@@ -99,6 +103,39 @@ def quiet_cap(quiet, now):
     return quiet["max_speed"] if inside else None
 
 
+def _minutes(hhmm):
+    return int(hhmm[:2]) * 60 + int(hhmm[3:])
+
+
+def active_profiles(schedule, now):
+    """The profiles in force at `now` (a time.struct_time). A profile that runs past midnight
+    belongs to the day it starts on."""
+    minute, day = now.tm_hour * 60 + now.tm_min, now.tm_wday
+    out = []
+    for p in schedule:
+        start, end = _minutes(p["start"]), _minutes(p["end"])
+        if start == end:
+            on = day in p["days"]
+        elif start < end:
+            on = day in p["days"] and start <= minute < end
+        else:
+            on = (day in p["days"] and minute >= start) or ((day - 1) % 7 in p["days"] and minute < end)
+        if on:
+            out.append(p)
+    return out
+
+
+def apply_schedule(settings, now):
+    """Settings with the profiles in force applied, and the speed cap they set (or None) with the
+    name of the profile that set it."""
+    active = active_profiles(settings.get("schedule", []), now)
+    caps = [(p["max_speed"], p["name"]) for p in active if p.get("max_speed") is not None]
+    targets = [p["smart_target"] for p in active if p.get("smart_target") is not None]
+    if targets:
+        settings = {**settings, "smart_target": min(targets)}
+    return settings, min(caps) if caps else (None, None)
+
+
 def aggregate(points):
     """One long-history point from a bucket of readings: averages, the hottest CPU, and the
     fan speed set by this controller only if it was in control for most of the bucket."""
@@ -154,6 +191,27 @@ def validate_settings(new, current):
             and type(q["enabled"]) is bool and type(q["max_speed"]) is int and 0 <= q["max_speed"] <= 100
             and all(isinstance(q[k], str) and re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", q[k]) for k in ("start", "end"))):
         raise ValueError("quiet hours need enabled, start and end as HH:MM, and a max_speed from 0 to 100")
+    sched = s["schedule"]
+    if not (isinstance(sched, list) and len(sched) <= 8):
+        raise ValueError("the schedule holds up to 8 profiles")
+    for p in sched:
+        if not (isinstance(p, dict) and set(p) == {"name", "days", "start", "end", "max_speed", "smart_target"}):
+            raise ValueError("each profile needs name, days, start, end, max_speed and smart_target")
+        if not (isinstance(p["name"], str) and 1 <= len(p["name"].strip()) <= 30):
+            raise ValueError("give each profile a name of 1 to 30 characters")
+        if not (isinstance(p["days"], list) and p["days"] and all(type(d) is int and 0 <= d <= 6 for d in p["days"])
+                and len(set(p["days"])) == len(p["days"])):
+            raise ValueError(f"{p['name']}: pick at least one day")
+        if not all(isinstance(p[k], str) and re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", p[k]) for k in ("start", "end")):
+            raise ValueError(f"{p['name']}: start and end must be HH:MM")
+        if p["max_speed"] is not None and not (type(p["max_speed"]) is int and 0 <= p["max_speed"] <= 100):
+            raise ValueError(f"{p['name']}: the maximum speed must be a whole number from 0 to 100")
+        if p["smart_target"] is not None and not (type(p["smart_target"]) in (int, float)
+                                                  and 40 <= p["smart_target"] <= s["failsafe_temp"] - 3):
+            raise ValueError(f"{p['name']}: the smart target must be 40 °C or more, and 3 °C below the failsafe")
+        if p["max_speed"] is None and p["smart_target"] is None:
+            raise ValueError(f"{p['name']}: set a maximum speed, a smart target, or both")
+        p["name"], p["days"] = p["name"].strip(), sorted(p["days"])
     if not (type(s["smart_target"]) in (int, float) and 40 <= s["smart_target"] <= 85):
         raise ValueError("smart target must be between 40 and 85 °C")
     if s["mode"] == "smart" and s["smart_target"] >= s["failsafe_temp"] - 3:

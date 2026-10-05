@@ -11,8 +11,8 @@ from collections import deque
 
 from .alerts import alert_config, notify
 from .config import DATA_DIR, HISTORY_SECONDS, INTERVAL, LONG_BUCKET, LONG_SECONDS, SAVE_EVERY, STALL_SECONDS, write_json
-from .control import (DEFAULT_SETTINGS, aggregate, curve_speed, decide, failed_fans, learned_curve, quiet_cap, ramped,
-                      smart_step, speed_text, validate_learned)
+from .control import (DEFAULT_SETTINGS, aggregate, apply_schedule, curve_speed, decide, failed_fans, learned_curve,
+                      quiet_cap, ramped, smart_step, speed_text, validate_learned)
 from .drivers import DRIVERS, HOST_RE, DemoDriver, DriverError, RedfishDriver
 
 # ---------------------------------------------------------------- one server
@@ -150,7 +150,12 @@ class Server:
     # ---- control loop
 
     def cycle(self):
-        settings = self.settings()
+        now_local = time.localtime()
+        settings, (profile_cap, profile) = apply_schedule(self.settings(), now_local)
+        quiet = quiet_cap(settings["quiet"], now_local)
+        # the lowest cap in force, and what to call it in the reason line
+        cap, cap_name = min(((c, n) for c, n in ((quiet, "quiet hours"), (profile_cap, profile)) if c is not None),
+                            default=(None, None))
         try:
             sensors = self.driver.read()
         except DriverError as e:
@@ -176,8 +181,8 @@ class Server:
         smart = None
         if effective == "manual" and settings["mode"] == "smart":
             with self.lock:  # forget_learned() clears the map from the HTTP thread
-                target, smart = smart_step(self.smart, self.learned, settings, cpu, sensors, time.time(),
-                                           quiet_cap(settings["quiet"], time.localtime()))
+                target, smart = smart_step(self.smart, self.learned, settings, cpu, sensors, time.time(), cap)
+            smart["reason"] = smart["reason"].replace(", quiet hours cap", f", {cap_name} cap")
             reason = smart["reason"]
             if target is None:
                 effective, reason, smart = "auto", "smart mode has no temperature to aim at", None
@@ -193,10 +198,9 @@ class Server:
                 self.window.clear()
         if speed is not None and speed > target:
             reason += f", holding {speed}% for ramp-down"
-        cap = quiet_cap(settings["quiet"], time.localtime()) if speed is not None and not smart else None
-        if cap is not None and speed > cap:
+        if cap is not None and speed is not None and not smart and speed > cap:
             speed = max(cap, settings["min_speed"])
-            reason += f", quiet hours cap {speed}%"
+            reason += f", {cap_name} cap {speed}%"
 
         error = None
         dry = self.control and settings["dry_run"]
