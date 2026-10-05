@@ -1,6 +1,7 @@
 """One server: its driver, settings, history and control loop. And the registry of all of them."""
 
 import json
+import logging
 import os
 import random
 import re
@@ -15,6 +16,9 @@ from .config import (DATA_DIR, HISTORY_SECONDS, INTERVAL, LONG_BUCKET, LONG_SECO
 from .control import (DEFAULT_SETTINGS, aggregate, apply_schedule, curve_speed, decide, failed_fans, learned_curve,
                       quiet_cap, ramped, smart_step, speed_text, validate_learned, validate_settings)
 from .drivers import DRIVERS, HOST_RE, DemoDriver, DriverError, RedfishDriver
+
+log = logging.getLogger("fanctl.server")
+LEVELS = {"info": logging.INFO, "warn": logging.WARNING, "error": logging.ERROR}
 
 # ---------------------------------------------------------------- one server
 
@@ -132,7 +136,7 @@ class Server:
                 write_json(self.smart_file, learned)
                 self.learned_saved = learned
         except OSError as e:
-            print(f"[{self.id}] could not save history: {e}", flush=True)
+            log.error("could not save history: %s", e, extra={"server": self.id})
         self.saved = time.time()
 
     def load_learned(self):
@@ -155,7 +159,7 @@ class Server:
     def log(self, msg, level="info"):
         with self.lock:  # HTTP threads log too, while reports iterate over the events
             self.events.appendleft({"t": time.time(), "level": level, "msg": msg})
-        print(time.strftime("%H:%M:%S"), f"[{self.id}]", level.upper(), msg, flush=True)
+        log.log(LEVELS.get(level, logging.INFO), "%s", msg, extra={"server": self.id})
 
     def demo_backfill(self):
         now = time.time()
@@ -612,7 +616,7 @@ def env_servers(env=os.environ):
         host = env.get(f"{prefix}HOST", "")
         driver = env.get(f"{prefix}DRIVER") or ("demo" if host == "demo" else "dell")
         if driver not in DRIVERS:
-            print(f"WARNING: {prefix}DRIVER={driver} is unknown; use one of {', '.join(DRIVERS)}", flush=True)
+            log.warning("%sDRIVER=%s is unknown; use one of %s", prefix, driver, ", ".join(DRIVERS))
             continue
         name = env.get(f"{prefix}NAME") or ("Demo server" if driver == "demo" else host)
         sid = unique_id(name, taken)

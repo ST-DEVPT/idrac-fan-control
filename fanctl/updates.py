@@ -2,6 +2,7 @@
 release of this project; nothing is sent but the request itself. UPDATE_CHECK=false turns it off."""
 
 import json
+import logging
 import os
 import re
 import time
@@ -43,7 +44,7 @@ def loop():
         try:
             check()
         except Exception as e:  # offline, rate limited: try again next time
-            print("update check failed:", e, flush=True)
+            logging.getLogger("fanctl.updates").info("update check failed: %s", e)
         time.sleep(12 * 3600)
 
 

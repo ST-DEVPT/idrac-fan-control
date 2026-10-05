@@ -4,6 +4,7 @@ The code lives in the fanctl package: drivers (how each kind of BMC is read and 
 control (decisions), server (the control loop and the registry), alerts (Discord) and web (HTTP).
 """
 
+import logging
 import os
 import signal
 import sys
@@ -11,9 +12,12 @@ import threading
 import time
 from http.server import ThreadingHTTPServer
 
-from fanctl import config, updates, web
+from fanctl import config, logs, updates, web
 from fanctl.alerts import DISCORD_WEBHOOK, WEBHOOK_RE, reporter
 from fanctl.server import SERVERS, load_registry, release_all, stalled
+
+
+log = logging.getLogger("fanctl")
 
 
 def data_dir_writable():
@@ -34,7 +38,7 @@ def shutdown(*_):
         s.log("Stopping: handing fans back to automatic control")
     failed = release_all(SERVERS.values(), deadline=40)
     if failed:
-        print(f"ERROR could not hand the fans back for {', '.join(failed)}", flush=True)
+        log.error("could not hand the fans back for %s", ", ".join(failed))
     for s in list(SERVERS.values()):
         s.save_history()
     os._exit(0)
@@ -48,7 +52,7 @@ def watchdog():
         time.sleep(30)
         stuck = stalled(SERVERS.values())
         if stuck:
-            print(f"ERROR: control loop stalled for {', '.join(stuck)}; handing fans back and restarting", flush=True)
+            log.error("control loop stalled for %s; handing fans back and restarting", ", ".join(stuck))
             release_all(SERVERS.values(), deadline=20)  # a stuck loop's lock is not waited on for long
             os._exit(1)
 
@@ -81,15 +85,16 @@ class BoundedServer(ThreadingHTTPServer):
 
 
 def main():
+    logs.setup()
     if not data_dir_writable():
         sys.exit(f"ERROR: cannot write to {config.DATA_DIR.resolve()}. The container runs as uid 1000; "
                  "fix the volume's owner with: chown -R 1000:1000 <host folder>")
     load_registry()
     web.KEY = web.session_key() if config.WEB_PASSWORD else b""
     if DISCORD_WEBHOOK and not WEBHOOK_RE.fullmatch(DISCORD_WEBHOOK):
-        print("WARNING: DISCORD_WEBHOOK_URL is not a Discord webhook URL; it is ignored", flush=True)
+        log.warning("DISCORD_WEBHOOK_URL is not a Discord webhook URL; it is ignored")
     if not config.WEB_PASSWORD:
-        print("WARNING: WEB_PASSWORD is not set; the dashboard is open to anyone who can reach it", flush=True)
+        log.warning("WEB_PASSWORD is not set; the dashboard is open to anyone who can reach it")
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
     for srv in list(SERVERS.values()):
@@ -97,7 +102,7 @@ def main():
     threading.Thread(target=reporter, args=(SERVERS,), daemon=True, name="reporter").start()
     threading.Thread(target=watchdog, daemon=True, name="watchdog").start()
     threading.Thread(target=updates.loop, daemon=True, name="updates").start()
-    print(f"Fan Control {config.VERSION} listening on :{config.PORT} for {len(SERVERS)} server(s)", flush=True)
+    log.info("Fan Control %s listening on :%s for %d server(s)", config.VERSION, config.PORT, len(SERVERS))
     BoundedServer(("0.0.0.0", config.PORT), web.Handler).serve_forever()
 
 

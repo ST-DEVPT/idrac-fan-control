@@ -1,6 +1,7 @@
 """Settings that come from the environment, and small helpers every module uses."""
 
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -87,7 +88,7 @@ def read_json(path, default, what=None, corrupt=None):
     except FileNotFoundError:
         return default
     except OSError as e:
-        print(f"ERROR cannot read {path.name}: {e}", flush=True)
+        logging.getLogger("fanctl.data").error("cannot read %s: %s", path.name, e)
         return default
     try:
         return json.loads(text)
@@ -98,5 +99,5 @@ def read_json(path, default, what=None, corrupt=None):
             path.replace(aside)
         except OSError:
             aside = path
-        print(f"ERROR {what or path.name} is corrupt ({e}); kept as {aside.name}", flush=True)
+        logging.getLogger("fanctl.data").error("%s is corrupt (%s); kept as %s", what or path.name, e, aside.name)
         return default if corrupt is None else corrupt

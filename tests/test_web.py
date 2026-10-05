@@ -246,6 +246,26 @@ class HTTP(Base):
         finally:
             alerts.save_alerts(saved)
 
+    def test_every_route_checks_its_access(self):
+        """Walk the route table: nothing that needs a session answers without one, and no admin
+        route answers a read-only account, whatever order the routes are declared in."""
+        st, h, _ = self.req("POST", "/api/login", {"password": "lookonly"})
+        viewer = {"Cookie": h["Set-Cookie"].split(";")[0]}
+        concrete = lambda p: (p.pattern.replace(r"\Z", "").replace("([a-z0-9-]+)", "rack-a")  # noqa: E731
+                              .replace("(/delete)?", "").replace("(.+)", "x"))
+        checked = 0
+        for method, pattern, access, _ in web.ROUTES:
+            if access == "public":
+                continue
+            path, body = concrete(pattern), ({} if method == "POST" else None)
+            st = self.req(method, path, body)[0]
+            self.assertIn(st, (303, 401), f"{method} {path} without a session")
+            if access == "admin":
+                st = self.req(method, path, body, viewer)[0]
+                self.assertEqual(st, 403, f"{method} {path} as a viewer")
+            checked += 1
+        self.assertGreater(checked, 25)
+
     def test_viewers_cannot_read_bmc_accounts(self):
         st, h, _ = self.req("POST", "/api/login", {"password": "lookonly"})
         viewer = {"Cookie": h["Set-Cookie"].split(";")[0]}

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import re
 import threading
 import time
@@ -16,6 +17,7 @@ from .drivers import SameOriginRedirect
 
 # ---------------------------------------------------------------- alerts
 
+log = logging.getLogger("fanctl.alerts")
 ALERTS_FILE = DATA_DIR / "alerts.json"
 WEBHOOK_RE = re.compile(r"https://(?:(?:ptb|canary)\.)?(?:discord|discordapp)\.com/api/webhooks/\d+/[\w-]+")
 LEVELS = ("error", "warn", "ok", "info")
@@ -71,6 +73,7 @@ ALERT_DEFAULTS = {
     "channels": {c: {"enabled": False, "url": "", "token": ""} for c in CHANNELS},
 }
 alert_lock = threading.Lock()
+SENT = {"sent": 0, "failed": 0}  # alerts handed to a channel, and those that failed: for /metrics
 last_alert = {}  # (server id, kind) -> time, for the cooldown
 
 
@@ -424,7 +427,7 @@ def send_report(servers, force=False):
         if not msg_id:
             msg_id = post_webhook(url, payload).get("id")
     except Exception as e:
-        print("Discord status report failed:", e, flush=True)
+        log.error("Discord status report failed: %s", e)
         return
     write_json(REPORT_STATE, {"last": time.time(), "message_id": msg_id, "hook": hook})
 
@@ -435,7 +438,7 @@ def reporter(servers):
         try:
             send_report(servers)
         except Exception as e:  # a reporting bug must never stop the reports for good
-            print("status report error:", repr(e), flush=True)
+            log.exception("status report error: %r", e)
 
 
 def notify(server, kind, **values):
@@ -463,12 +466,16 @@ def notify(server, kind, **values):
         if url:
             try:
                 post_webhook(url, build_payload(cfg, kind, values))
+                SENT["sent"] += 1
             except Exception as e:
-                print("Discord webhook failed:", e, flush=True)
+                log.error("Discord alert failed: %s", e, extra={"server": server.id})
+                SENT["failed"] += 1
         for c in chans:  # one failing channel never stops the others
             try:
                 send_channel(cfg, c, kind, values)
+                SENT["sent"] += 1
             except Exception as e:
-                print(f"{c} alert failed:", e, flush=True)
+                log.error("%s alert failed: %s", c, e, extra={"server": server.id})
+                SENT["failed"] += 1
 
     threading.Thread(target=send, daemon=True).start()
