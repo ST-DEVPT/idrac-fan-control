@@ -94,35 +94,128 @@ class Protection(unittest.TestCase):
         self.assertIsNone(validate_settings({"exhaust_limit": None}, dict(DEFAULT_SETTINGS))["exhaust_limit"])
 
 
+class Plant:
+    """A CPU on a heatsink: the die follows the heatsink within seconds, the heatsink warms over
+    minutes, and more air cools it better. Read the way a BMC reports it: whole degrees, every 5 s,
+    with the power draw of the whole server, fans included."""
+
+    def __init__(self, power=20, inlet=22, speed=30):
+        self.power, self.inlet, self.speed = power, inlet, speed
+        self.hs = inlet + power * 0.12 / (speed / 100)
+        self.die = self.hs + power * 0.18
+
+    def run(self, seconds):
+        for _ in range(seconds):
+            resistance = 0.12 / (max(self.speed, 5) / 100)
+            self.hs += (self.power - (self.hs - self.inlet) / resistance) / 500
+            self.die += (self.hs + self.power * 0.18 - self.die) / 4
+
+    def sensors(self):
+        return {"temps": [], "inlet": self.inlet, "watts": round(70 + 2 * self.power + 60 * (self.speed / 100) ** 3)}
+
+
 class Smart(unittest.TestCase):
-    """Smart mode in a simple thermal model: heat from load, cooling that grows with fan speed."""
-    S = {**DEFAULT_SETTINGS, "mode": "smart", "smart_target": 60, "min_speed": 10, "exhaust_limit": None}
+    S = {**DEFAULT_SETTINGS, "mode": "smart", "smart_target": 60, "min_speed": 10, "exhaust_limit": None,
+         "failsafe_temp": 75, "ramp_down_seconds": 60}
 
-    def run_model(self, load, steps=600, dt=15, start=40.0):
+    def drive(self, power, minutes, settings=None, learned=None, cap=lambda t: None, plant=None):
+        """Run smart mode against the plant; power(t) and cap(t) take seconds. Returns
+        [(t, reading, speed, info)] for every 5 s step, and the learned map."""
         from fanctl.control import smart_step
-        temp, memory, speeds = start, {}, []
-        for _ in range(steps):
-            speed, _ = smart_step(memory, self.S, temp, {"temps": []}, dt)
-            for _ in range(dt):
-                temp += 0.01 * (load - (temp - 25) * (0.3 + speed / 25))
-            speeds.append(speed)
-        return temp, speeds
+        plant = plant or Plant()
+        memory, learned, out = {}, {} if learned is None else learned, []
+        for t in range(0, minutes * 60, 5):
+            plant.power = power(t)
+            reading = round(plant.die)
+            speed, info = smart_step(memory, learned, settings or self.S, reading, plant.sensors(), t, cap(t))
+            plant.speed = speed
+            out.append((t, reading, speed, info))
+            plant.run(5)
+        return out, learned
 
-    def test_holds_the_target_under_load(self):
-        temp, speeds = self.run_model(load=60)
-        self.assertAlmostEqual(temp, 60, delta=1.5)
-        self.assertTrue(30 <= speeds[-1] <= 42)
+    @staticmethod
+    def between(log, a, b):
+        return [x for x in log if a * 60 <= x[0] < b * 60]
+
+    @staticmethod
+    def travel(log):
+        return sum(abs(p[2] - q[2]) for p, q in zip(log, log[1:]))
+
+    def test_holds_the_target_and_settles(self):
+        log, learned = self.drive(lambda t: 95, 30)
+        last = self.between(log, 15, 30)
+        self.assertLessEqual(max(abs(x[1] - 60) for x in last), 2)
+        self.assertLessEqual(self.travel(last), 6)          # settled: hardly a change in 15 minutes
+        self.assertTrue(learned)                           # and it remembered the speed
 
     def test_idles_at_the_floor_without_hunting(self):
-        temp, speeds = self.run_model(load=20)
-        self.assertLess(temp, 60)
-        self.assertEqual(set(speeds[-100:]), {10})
+        log, _ = self.drive(lambda t: 20, 30)
+        self.assertEqual({x[2] for x in self.between(log, 5, 30)}, {10})
+
+    def test_second_time_round_the_map_leads(self):
+        steps = lambda t: 95 if 20 * 60 <= t < 40 * 60 or 60 * 60 <= t < 80 * 60 else 20  # noqa: E731
+        log, learned = self.drive(steps, 100)
+        first, second = self.between(log, 20, 25), self.between(log, 60, 65)
+        self.assertLessEqual(first[12][3]["learned"], 15)   # a minute in, the first time: only idle is known
+        self.assertGreaterEqual(second[12][3]["learned"], 40)  # the second time: what held the load before
+        mean = lambda seg: sum(x[1] for x in seg) / len(seg)  # noqa: E731
+        self.assertLess(abs(mean(second) - 60), abs(mean(first) - 60))  # closer to the target, sooner
+        self.assertLess(max(x[1] for x in log), 75)
+
+    def test_bursty_load_does_not_make_the_fans_hunt(self):
+        bursty = lambda t: 95 if t % 90 < 30 else 20  # noqa: E731
+        held, _ = self.drive(bursty, 40)
+        chased, _ = self.drive(bursty, 40, {**self.S, "ramp_down_seconds": 0})
+        self.assertLess(self.travel(self.between(held, 10, 40)), self.travel(self.between(chased, 10, 40)) / 2)
+        self.assertLess(max(x[1] for x in held), 70)
+
+    def test_quiet_hours_give_way_before_the_failsafe(self):
+        cap = lambda t: 30 if 20 * 60 <= t < 40 * 60 else None  # noqa: E731
+        log, _ = self.drive(lambda t: 95, 50, cap=cap)
+        quiet = self.between(log, 20, 40)
+        self.assertLess(max(x[1] for x in quiet), 75)       # never as far as the failsafe
+        for _, temp, speed, _ in quiet:
+            if speed > 30:
+                self.assertGreaterEqual(temp, 67 - 1)        # louder than the cap only when close to it
+        after = self.between(log, 40, 50)
+        self.assertLess(max(x[2] for x in after), 80)        # no burst when quiet hours end
+
+    def test_boost_when_heading_for_the_trip_point(self):
+        from fanctl.control import smart_step
+        memory = {}
+        for t, temp in ((0, 60), (5, 61), (10, 62), (15, 64), (20, 66), (25, 68), (30, 69), (35, 70)):
+            speed, info = smart_step(memory, {}, self.S, temp, {"temps": []}, t)
+        self.assertTrue(info["boost"])
+        self.assertIn("boost, CPU 70°C heading for 75°C", info["reason"])
+        self.assertGreaterEqual(speed, 55)
 
     def test_follows_other_sensors(self):
-        from fanctl.control import smart_errors
-        hot_pcie = {"temps": [{"name": "PCIe 1", "value": 64, "cpu": False, "warn": 75}]}
-        name, err = max(smart_errors(self.S, 50, hot_pcie), key=lambda e: e[1])
-        self.assertEqual((name, err), ("PCIe 1", 2))  # aims at 75 - 5 margin - 8
+        from fanctl.control import smart_watch
+        hot = {"temps": [{"name": "PCIe 1", "value": 64, "cpu": False, "warn": 75}]}
+        self.assertIn(("PCIe 1", 64, 62, 70), smart_watch(self.S, 50, hot))  # 75 warn - 5 margin = trip, -8 = target
+        room = {"temps": [{"name": "System Board Inlet Temp", "value": 35, "cpu": False, "warn": 42}]}
+        self.assertEqual([w[0] for w in smart_watch(self.S, 50, room)], ["CPU"])  # fans can't cool the room
+        from fanctl.control import smart_step
+        _, info = smart_step({}, {}, self.S, 50, hot, 0)
+        self.assertEqual(info["sensor"], "PCIe 1")
+
+    def test_dry_run_learns_nothing(self):
+        _, learned = self.drive(lambda t: 95, 20, {**self.S, "dry_run": True})
+        self.assertEqual(learned, {})
+
+    def test_map(self):
+        from fanctl.control import SMART_BIN, learned_curve, map_speed, validate_learned
+        m = {"20": 20.0, "30": 40.0, "25": 15.0}       # a noisy point below its neighbour
+        x20, x30 = SMART_BIN ** 20, SMART_BIN ** 30
+        self.assertEqual(map_speed(m, x20 / 2), 20)     # below the first point: the first point
+        self.assertEqual(map_speed(m, SMART_BIN ** 25), 20)  # never lower for a higher load
+        self.assertAlmostEqual(map_speed(m, (SMART_BIN ** 25 + x30) / 2), 30, delta=1)
+        self.assertGreater(map_speed(m, x30 * 1.2), 40)  # carried on past the last point
+        self.assertIsNone(map_speed({}, 5))
+        self.assertIsNone(map_speed(m, None))
+        self.assertEqual(validate_learned({"3": 40, "x": 1, "4": 140, "5": "9", "6": True}), {"3": 40.0})
+        self.assertEqual(validate_learned([1, 2]), {})
+        self.assertEqual([p[1] for p in learned_curve(m, self.S, 22)], [20, 20, 40])
 
     def test_validation(self):
         self.assertEqual(validate_settings({"mode": "smart"}, dict(DEFAULT_SETTINGS))["mode"], "smart")

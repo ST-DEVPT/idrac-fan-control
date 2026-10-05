@@ -11,7 +11,8 @@ from collections import deque
 
 from .alerts import alert_config, notify
 from .config import DATA_DIR, HISTORY_SECONDS, INTERVAL, LONG_BUCKET, LONG_SECONDS, SAVE_EVERY, write_json
-from .control import DEFAULT_SETTINGS, aggregate, curve_speed, decide, quiet_cap, ramped, smart_step, speed_text
+from .control import (DEFAULT_SETTINGS, aggregate, curve_speed, decide, learned_curve, quiet_cap, ramped, smart_step,
+                      speed_text, validate_learned)
 from .drivers import DRIVERS, HOST_RE, DemoDriver, DriverError, RedfishDriver
 
 # ---------------------------------------------------------------- one server
@@ -25,6 +26,7 @@ class Server:
         # the single-server setup of 1.0 keeps its settings file
         self.settings_file = DATA_DIR / ("settings.json" if cfg.get("legacy") else f"settings-{self.id}.json")
         self.history_file = DATA_DIR / f"history-{self.id}.json"
+        self.smart_file = DATA_DIR / f"smart-{self.id}.json"  # what smart mode learned about this server
         self.lock = threading.Lock()
         self.wake = threading.Event()
         self.stop = threading.Event()
@@ -34,6 +36,9 @@ class Server:
         self.events = deque(maxlen=100)
         self.window = deque()  # (time, target) pairs for the ramp-down delay
         self.smart = {}        # smart mode controller memory
+        self.learned = self.load_learned()  # smart mode: heat load -> speed that held the target
+        self.learned_saved = dict(self.learned)
+        self.logged = None     # last speed written to the event log
         self.hot = False       # above the "running hot" alert threshold
         self.saved = time.time()
         self.pcie_applied = None
@@ -42,7 +47,8 @@ class Server:
         self.cmd_lock = threading.Lock()  # fan commands vs. release(): never both at once
         self.state = {"sensors": None, "cpu_temp": None, "effective": None, "applied_speed": None,
                       "target_speed": None, "reason": "", "failsafe": False, "error": None,
-                      "updated": None, "power": None, "model": None, "dry_run": False}
+                      "updated": None, "power": None, "model": None, "dry_run": False, "smart": None,
+                      "smart_map": []}
 
     @property
     def control(self):
@@ -81,11 +87,32 @@ class Server:
     def save_history(self):
         with self.lock:
             data = {"history": list(self.history), "long": list(self.long), "events": list(self.events)}
+            learned = dict(self.learned)
         try:
             write_json(self.history_file, data)
+            if learned != self.learned_saved:
+                write_json(self.smart_file, learned)
+                self.learned_saved = learned
         except OSError as e:
             print(f"[{self.id}] could not save history: {e}", flush=True)
         self.saved = time.time()
+
+    def load_learned(self):
+        try:
+            return validate_learned(json.loads(self.smart_file.read_text()))
+        except (OSError, ValueError):
+            return {}
+
+    def forget_learned(self, who=""):
+        with self.lock:
+            self.learned.clear()
+            self.learned_saved = {}
+            self.state["smart_map"] = []
+        try:
+            self.smart_file.unlink()
+        except OSError:
+            pass
+        self.log(f"Smart mode starts learning afresh{' (' + who + ')' if who else ''}")
 
     def log(self, msg, level="info"):
         self.events.appendleft({"t": time.time(), "level": level, "msg": msg})
@@ -137,26 +164,27 @@ class Server:
                 effective, target, reason = "auto", None, "server is powered off"
         else:
             effective, target, reason, failsafe = "monitor", None, "monitoring only", False
+        smart = None
         if effective == "manual" and settings["mode"] == "smart":
-            now = time.time()
-            dt = min(120, now - self.smart.get("t", now - INTERVAL))
-            target, reason = smart_step(self.smart, settings, cpu, sensors, dt)
-            self.smart["t"] = now
+            with self.lock:  # forget_learned() clears the map from the HTTP thread
+                target, smart = smart_step(self.smart, self.learned, settings, cpu, sensors, time.time(),
+                                           quiet_cap(settings["quiet"], time.localtime()))
+            reason = smart["reason"]
             if target is None:
-                effective, reason = "auto", "smart mode has no temperature to aim at"
+                effective, reason, smart = "auto", "smart mode has no temperature to aim at", None
         else:
-            self.smart = {}  # start afresh next time smart mode takes over
+            self.smart = {}  # start afresh next time smart mode takes over; what it learned stays
         speed = None
         with self.lock:  # save_settings() clears the window from the HTTP thread
-            if effective == "manual" and settings["mode"] == "smart":
-                speed = target  # smart mode slows down gently on its own
+            if smart:
+                speed = target  # smart mode holds, slows down and keeps quiet hours on its own
             elif effective == "manual":
                 speed = ramped(self.window, time.time(), target, settings["ramp_down_seconds"])
             else:
                 self.window.clear()
         if speed is not None and speed > target:
             reason += f", holding {speed}% for ramp-down"
-        cap = quiet_cap(settings["quiet"], time.localtime()) if speed is not None else None
+        cap = quiet_cap(settings["quiet"], time.localtime()) if speed is not None and not smart else None
         if cap is not None and speed > cap:
             speed = max(cap, settings["min_speed"])
             reason += f", quiet hours cap {speed}%"
@@ -197,10 +225,14 @@ class Server:
                 "speed": speed_text(effective, speed)}
         with self.lock:
             prev = self.state
-            if (effective, speed) != (prev["effective"], prev["applied_speed"]) and effective != "monitor":
+            # every change of who is in control, but speed changes only from 5 % on: a slow
+            # ramp moves 1 % at a time and would push everything else out of the event log
+            if effective != "monitor" and (effective != prev["effective"] or (
+                    speed is not None and (self.logged is None or abs(speed - self.logged) >= 5))):
                 self.log(("Dry run: would set fans to " if dry else "Fans → ")
                          + f"{'automatic' if effective == 'auto' else f'{speed}%'} ({reason})",
                          "warn" if failsafe or error else "info")
+                self.logged = speed
             if prev["error"] and not error:
                 self.log("BMC responding again", "info")
                 notify(self, "recovered", **vals)
@@ -220,7 +252,8 @@ class Server:
                 self.hot = False
             self.state.update(sensors=sensors, cpu_temp=cpu, effective=effective, applied_speed=speed,
                               target_speed=target, reason=reason, failsafe=failsafe, error=error,
-                              updated=time.time(), power=power, dry_run=dry)
+                              updated=time.time(), power=power, dry_run=dry, smart=smart,
+                              smart_map=learned_curve(self.learned, settings, sensors["inlet"]))
             rpms = [f["rpm"] for f in sensors["fans"] if f["rpm"] is not None]
             pcts = [f["pct"] for f in sensors["fans"] if f["pct"] is not None]
             self.record({"t": round(time.time()), "cpu": cpu, "speed": speed,
@@ -378,7 +411,7 @@ def stop(srv, forget=False):
     srv.save_history()
     SERVERS.pop(srv.id, None)
     if forget:
-        for f in (srv.settings_file, srv.history_file):
+        for f in (srv.settings_file, srv.history_file, srv.smart_file):
             try:
                 f.unlink()
             except OSError:

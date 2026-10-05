@@ -1,5 +1,6 @@
 """Fan control decisions: pure functions, no I/O, so they are easy to test."""
 
+import math
 import re
 
 from .config import FAILSAFE_HYSTERESIS
@@ -159,52 +160,239 @@ def speed_text(effective, speed):
 
 
 # ---------------------------------------------------------------- smart mode
+#
+# Smart mode holds every temperature it watches at a target with as little fan as it can. Three
+# parts, each covering what the others can't:
+#   - a map, learned while it runs, from heat load to the speed that held the target at that load.
+#     When the load changes, the fans go straight to what worked before instead of waiting for the
+#     heat: a CPU die warms within seconds of a load, its heatsink over minutes.
+#   - a look-ahead: each temperature is judged where its trend puts it SMART_HORIZON seconds on.
+#   - a PI trim on top, which corrects what the map gets wrong, and which the map slowly absorbs.
+# And a boost when anything heads for its trip point, so the BMC rarely has to take over.
 
-SMART_KP = 2.0        # % of fan speed per °C above target, applied at once
-SMART_KI = 0.04       # % per °C per second, accumulated: removes the steady-state error
-SMART_UP = 15         # most the speed may rise in one step, in %
-SMART_DOWN = 0.2      # most it may fall per second, in % (a slow fall is a quiet fall)
-SMART_MIN_CHANGE = 2  # % below which a correction is not worth a change of fan noise
+SMART_HORIZON = 40          # s of look-ahead
+SMART_WINDOW = 60           # s of readings a trend is fitted over
+SMART_KP = 1.5              # % per °C of predicted error, applied at once
+SMART_KI = 0.03             # % per °C per second of actual error, accumulated
+SMART_DEADBAND = 0.5        # °C either side of the target where the trim stops accumulating
+SMART_UP = 20               # most the speed rises in one step, in %
+SMART_DOWN = 0.15           # most it falls per second near the target, in % (a slow fall is a quiet fall)
+SMART_DOWN_FAR = 0.4        # ...and when everything is well below target
+SMART_MIN_CHANGE = 2        # % below which a correction is not worth a change of fan noise
+SMART_BOOST = 25            # % added at once when something heads for its trip point
+SMART_BOOST_MARGIN = 4      # °C: "heading for" = predicted within this of the trip point, and already close
+SMART_YIELD = 8             # °C below a trip point where quiet hours start to give way...
+SMART_YIELD_RATE = 10       # ...by this many % per °C closer
+SMART_LOAD_TAU = 60         # s: power is averaged over about this long; a burst shorter than the
+                            # heatsink can feel should not move the fans
+SMART_LEARN_RATE = 1 / 120  # per second of steady running: a few minutes to trust a new reading
+SMART_BIN = 1.05            # map resolution: one point per 5 % of heat load
 
 
-def smart_errors(settings, cpu, sensors):
-    """How far each watched temperature is above where smart mode wants it, in °C.
-    The CPU aims at smart_target; the exhaust air and every sensor with a BMC warning
-    threshold aim at 8 °C below the point where the failsafe would trip."""
+def smart_watch(settings, cpu, sensors):
+    """What smart mode looks after: (name, value, target, trip point). The CPU aims at smart_target
+    and trips at the failsafe; the exhaust air and every sensor with a BMC warning threshold aim at
+    8 °C below the point where they would trip. Inlet air is left out: no fan speed cools the room."""
     out = []
     if cpu is not None:
-        out.append(("CPU", cpu - settings["smart_target"]))
+        out.append(("CPU", cpu, settings["smart_target"], settings["failsafe_temp"]))
     sensors = sensors or {}
-    if settings.get("exhaust_limit") is not None and sensors.get("exhaust") is not None:
-        out.append(("exhaust", sensors["exhaust"] - (settings["exhaust_limit"] - 8)))
+    limit = settings.get("exhaust_limit")
+    if limit is not None and sensors.get("exhaust") is not None:
+        out.append(("exhaust", sensors["exhaust"], limit - 8, limit))
     if settings.get("bmc_thresholds", True):
         margin = settings.get("threshold_margin", 5)
         for t in sensors.get("temps", []):
-            if t.get("warn") and not t["cpu"]:
-                out.append((t["name"], t["value"] - (t["warn"] - margin - 8)))
+            if t.get("warn") and not t["cpu"] and not re.search(r"inlet|ambient|intake", t["name"], re.I):
+                trip = t["warn"] - margin
+                out.append((t["name"], t["value"], trip - 8, trip))
     return out
 
 
-def smart_step(memory, settings, cpu, sensors, dt):
-    """One step of a PI controller on the worst error. memory holds the integral and the last
-    output between calls; pass {} to start. Returns (speed, reason)."""
-    errors = smart_errors(settings, cpu, sensors)
-    if not errors:
-        return None, "no temperature to aim at"
-    name, err = max(errors, key=lambda e: e[1])
-    if "e" in memory:  # light smoothing: BMC readings jitter by a degree
-        err = 0.5 * memory["e"] + 0.5 * err
-    memory["e"] = err
+def trend(points):
+    """Least-squares line through [(t, value), ...]: (value now, °C per second). The fit smooths the
+    whole-degree steps BMCs report in; with under half a window of readings there is no trend yet."""
+    t_now, v_now = points[-1]
+    if t_now - points[0][0] < SMART_WINDOW / 2:
+        return v_now, 0.0
+    n = len(points)
+    mt = sum(t for t, _ in points) / n
+    mv = sum(v for _, v in points) / n
+    slope = sum((t - mt) * (v - mv) for t, v in points) / sum((t - mt) ** 2 for t, _ in points)
+    return mv + slope * (t_now - mt), slope
+
+
+def heat_load(settings, watts, inlet):
+    """How much cooling the server needs, as one number: its power draw over the room the target
+    leaves above the inlet air, in W/°C. The same work needs more air on a warm day and less with a
+    warmer target, so one learned map holds across seasons and targets."""
+    if not watts:
+        return None
+    return watts / max(5, settings["smart_target"] - (25 if inlet is None else inlet))
+
+
+def map_speed(learned, load):
+    """The speed the learned map gives for a heat load, or None: interpolated between learned
+    points, never lower for a higher load, and carried on past the last point along their slope."""
+    if load is None or not learned:
+        return None
+    pts, top = [], 0
+    for b, v in sorted((int(k), v) for k, v in learned.items()):
+        top = max(top, v)
+        pts.append((SMART_BIN ** b, top))
+    if load <= pts[0][0]:
+        return pts[0][1]
+    for (x0, v0), (x1, v1) in zip(pts, pts[1:]):
+        if load <= x1:
+            return v0 + (v1 - v0) * (load - x0) / (x1 - x0)
+    (x0, v0), (x1, v1) = pts[0], pts[-1]
+    return min(100, v1 + ((v1 - v0) / (x1 - x0) * (load - x1) if x1 > x0 else 0))
+
+
+def learned_curve(learned, settings, inlet):
+    """The map as [[watts, speed], ...] at today's inlet temperature, for the dashboard."""
+    room = max(5, settings["smart_target"] - (25 if inlet is None else inlet))
+    out, top = [], 0
+    for b, v in sorted((int(k), v) for k, v in learned.items()):
+        top = max(top, v)
+        out.append([round(SMART_BIN ** b * room), round(top, 1)])
+    return out
+
+
+def validate_learned(data):
+    """A learned map read back from disk: {bin: speed}. Anything odd is dropped, never trusted."""
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for k, v in list(data.items())[:500]:
+        try:
+            b = int(k)
+        except (TypeError, ValueError):
+            continue
+        if -100 <= b <= 200 and type(v) in (int, float) and 0 <= v <= 100:
+            out[str(b)] = float(v)
+    return out
+
+
+def steady_speed(trail, worst, floor, now):
+    """The speed that has held things steady for the last SMART_WINDOW, or None. Steady means the
+    speed and the load barely moved and the worst temperature sits at its target with no trend; or
+    the fans sat on the floor with everything well below target, so the floor is all this load needs."""
+    recent = [p for p in trail if p[0] >= now - SMART_WINDOW]
+    if not recent or now - recent[0][0] < SMART_WINDOW * 0.75 or any(p[3] for p in recent):
+        return None
+    speeds, loads = [p[1] for p in recent], [p[2] for p in recent]
+    if None in loads or max(loads) > min(loads) * 1.08 or max(speeds) - min(speeds) > 3:
+        return None
+    err = worst["fit"] - worst["target"]
+    if abs(err) <= 1.5 and abs(worst["slope"]) <= 0.02:
+        return sum(speeds) / len(speeds)
+    if max(speeds) <= floor + 0.5 and err <= -2 and worst["slope"] <= 0.01:
+        return float(floor)
+    return None
+
+
+def smart_step(memory, learned, settings, cpu, sensors, now, ceiling=None):
+    """One step of smart mode. memory carries trends and the trim between calls (pass {} to start
+    afresh); learned is the load map, updated in place while things are steady. ceiling is the
+    quiet-hours cap, which only a boost may pass. Returns (speed, info): info says what it is
+    doing, for the reason line and the dashboard."""
+    sensors = sensors or {}
+    watch = smart_watch(settings, cpu, sensors)
+    if not watch:
+        return None, {"reason": "no temperature to aim at"}
     floor = settings.get("min_speed", 0)
-    last = memory.get("last", max(30, floor))
-    integral = memory.get("i", last - SMART_KP * err)  # start where we are, without a jump
-    # clamping anti-windup: the integral never pushes the output past the floor or 100 %
-    integral = min(100 - SMART_KP * err, max(floor - SMART_KP * err, integral + SMART_KI * err * dt))
-    raw = SMART_KP * err + integral
-    if abs(raw - last) < SMART_MIN_CHANGE and floor < raw < 100:
-        raw = last  # don't chase sensor noise one percent at a time
-    speed = min(raw, last + SMART_UP) if raw > last else max(raw, last - SMART_DOWN * dt)
-    speed = round(min(100, max(floor, speed)))
-    memory.update(i=integral, last=speed)
-    where = f"{name} {err:+.0f} °C from target" if name != "CPU" else f"CPU {cpu:.0f}°C, target {settings['smart_target']}°C"
-    return speed, f"smart: {where}"
+    ceiling = 100 if ceiling is None else max(floor, min(100, ceiling))
+    dt = min(120, max(0, now - memory.get("now", now)))
+    memory["now"] = now
+
+    # where each temperature is and where it is heading; a fall is trusted half as much as a rise
+    hist, items = memory.setdefault("temps", {}), []
+    for name, value, target, trip in watch:
+        pts = hist[name] = [p for p in hist.get(name, []) if p[0] > now - SMART_WINDOW] + [(now, value)]
+        fit, slope = trend(pts)
+        ahead = max(-10, min(8, slope * SMART_HORIZON * (1 if slope > 0 else 0.5)))
+        pred = fit + ahead
+        items.append({"name": name, "value": value, "fit": fit, "slope": slope, "pred": pred,
+                      "target": target, "trip": trip})
+    for name in set(hist) - {x["name"] for x in items}:
+        del hist[name]
+    gov = max(items, key=lambda x: x["pred"] - x["target"])     # what the speed answers to
+    worst = max(items, key=lambda x: x["fit"] - x["target"])    # what the trim answers to
+    e_pred, e_now = gov["pred"] - gov["target"], worst["fit"] - worst["target"]
+
+    # heat load from the power draw averaged over SMART_LOAD_TAU: the heatsink only feels sustained power
+    watts = sensors.get("watts")
+    if watts and memory.get("watts"):
+        memory["watts"] += (watts - memory["watts"]) * min(1, dt / SMART_LOAD_TAU)
+    else:
+        memory["watts"] = watts or None
+    load = heat_load(settings, memory["watts"], sensors.get("inlet"))
+    base = map_speed(learned, load)
+
+    last = memory.get("last")
+    if last is None:
+        memory["i"] = 0.0 if base is not None else float(max(30, floor))
+    elif (base is None) != (memory.get("base") is None):  # the map came or went: no jump
+        memory["i"] += (memory.get("base") or 0) - (base or 0)
+
+    # learn from the last minute if it was steady; the map takes over from the trim without a jump
+    learning = False
+    if load is not None and last is not None and not settings.get("dry_run"):
+        seen = steady_speed(memory.get("trail", []), worst, floor, now)
+        if seen is not None:
+            k = str(round(math.log(load) / math.log(SMART_BIN)))
+            old = learned.get(k)
+            learned[k] = round(seen if old is None else old + min(1, dt * SMART_LEARN_RATE) * (seen - old), 2)
+            new = map_speed(learned, load)
+            memory["i"] -= new - (base or 0)
+            base, learning = new, True
+
+    # quiet hours give way gradually as anything nears its trip point: louder fans beat a failsafe
+    closest = max(x["fit"] - (x["trip"] - SMART_YIELD) for x in items)
+    ceiling = min(100, ceiling + SMART_YIELD_RATE * max(0, closest)) if ceiling < 100 else 100
+
+    b, p = base or 0, SMART_KP * e_pred
+    raw = b + p + memory["i"]
+    # accumulate the actual error beyond the deadband, never further into a limit (anti-windup)
+    if abs(e_now) > SMART_DEADBAND and not (raw >= ceiling and e_now > 0) and not (raw <= floor and e_now < 0):
+        excess = e_now - math.copysign(SMART_DEADBAND, e_now)
+        memory["i"] = max(-100, min(100, memory["i"] + SMART_KI * excess * dt))
+        raw = b + p + memory["i"]
+
+    near = [x for x in items if x["pred"] >= x["trip"] - SMART_BOOST_MARGIN
+            and x["value"] >= x["trip"] - 2 * SMART_BOOST_MARGIN]
+    if last is None:
+        speed = raw
+    elif near:
+        speed = max(raw, last + SMART_BOOST)
+        memory["i"] = speed - b - p  # stay up there until the temperature turns
+    elif abs(raw - last) < SMART_MIN_CHANGE and floor < raw < ceiling:
+        speed = last  # don't chase sensor noise one percent at a time
+    elif raw > last:
+        speed = min(raw, last + SMART_UP)
+    elif now - memory.get("wanted", now) < settings.get("ramp_down_seconds", 60):
+        speed = last  # lower demand must last the ramp-down delay: a burst every minute holds the fans steady
+    else:
+        speed = max(raw, last - (SMART_DOWN_FAR if e_now < -4 else SMART_DOWN) * dt)
+    speed = min(100 if near else ceiling, max(floor, speed))
+    if last is None or raw >= speed - SMART_MIN_CHANGE:
+        memory["wanted"] = now  # last time the demand reached the speed
+    memory.update(last=speed, base=base)
+    trail = memory["trail"] = [x for x in memory.get("trail", []) if x[0] > now - 2 * SMART_WINDOW]
+    trail.append((now, speed, load, bool(near)))
+
+    if near:
+        x = max(near, key=lambda x: x["pred"] - x["trip"])
+        reason = f"smart: boost, {x['name']} {x['value']:.0f}°C heading for {x['trip']:.0f}°C"
+    else:
+        reason = f"smart: {gov['name']} {gov['value']:.0f}°C, target {gov['target']:.0f}°C"
+        if gov["pred"] >= gov["value"] + 1:
+            reason += f", rising to {gov['pred']:.0f}°C"
+        if raw > ceiling and speed >= ceiling:
+            reason += f", quiet hours cap {ceiling}%"
+    return round(speed), {
+        "reason": reason, "sensor": gov["name"], "value": gov["value"], "target": gov["target"],
+        "predicted": round(gov["pred"], 1), "trend": round(gov["slope"] * 60, 2),  # °C per minute
+        "learned": None if base is None else round(base), "trim": round(p + memory["i"], 1),
+        "boost": bool(near), "learning": learning, "points": len(learned)}

@@ -69,6 +69,29 @@ class Persistence(unittest.TestCase):
         self.assertEqual(copy.history[-1]["t"], a.history[-1]["t"])
 
 
+class SmartMemory(unittest.TestCase):
+    def test_learned_map_is_kept_and_can_be_forgotten(self):
+        srv = Server({"id": "learner", "name": "Learner", "driver": "demo"})
+        srv.learned.update({"20": 25.0, "24": 40.0})
+        srv.save_history()
+        copy = Server({"id": "learner", "name": "Learner", "driver": "demo"})
+        self.assertEqual(copy.learned, {"20": 25.0, "24": 40.0})
+        copy.forget_learned("test")
+        self.assertEqual(Server({"id": "learner", "name": "Learner", "driver": "demo"}).learned, {})
+
+    def test_smart_cycle_reports_what_it_does(self):
+        srv = Recorder("smart")
+        write_json(srv.settings_file, {"mode": "smart", "smart_target": 60})
+        srv.cycle()
+        self.assertTrue(srv.state["reason"].startswith("smart: "))
+        self.assertEqual(srv.state["smart"]["sensor"], "CPU")
+        self.assertEqual(srv.calls, [srv.state["applied_speed"]])
+        write_json(srv.settings_file, {"mode": "fixed"})
+        srv.cycle()
+        self.assertIsNone(srv.state["smart"])
+        srv.settings_file.unlink()
+
+
 class Recorder(Server):
     """A demo server whose fan commands are recorded."""
     def __init__(self, sid):
