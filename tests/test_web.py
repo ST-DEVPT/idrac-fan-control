@@ -5,7 +5,7 @@ import time
 import unittest
 from http.server import ThreadingHTTPServer
 
-from fanctl import config, server, web
+from fanctl import config, server, web, widgets
 from fanctl.server import SERVERS
 
 
@@ -170,7 +170,7 @@ class HTTP(Base):
             self.assertEqual(self.post("/api/widget-config", {"fields": ["password"]})[0], 400)
             self.assertEqual(self.req("POST", "/api/widget-config?token=e-token", {"fields": []})[0], 401)
         finally:
-            web.WIDGET_FILE.unlink(missing_ok=True)
+            widgets.WIDGET_FILE.unlink(missing_ok=True)
 
     def test_dashboard_tokens(self):
         from fanctl import tokens

@@ -10,7 +10,6 @@ import urllib.request
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-from . import config
 from .config import DATA_DIR, DISCORD_WEBHOOK, INTERVAL, VERSION, write_json
 from .control import speed_text
 

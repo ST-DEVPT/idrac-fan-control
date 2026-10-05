@@ -394,10 +394,12 @@ python -m unittest              # tests: drivers, control logic, smart mode, ser
 
 Python 3.10 or newer, no dependencies. The code is in `fanctl/`: `drivers.py` (how each kind of BMC is read
 and driven), `control.py` (decisions and smart mode, no I/O), `server.py` (control loop and server registry),
-`alerts.py` (Discord) and `web.py` (HTTP, sessions, metrics, backup); `app.py` starts it all. Adding a vendor
-means a class in `drivers.py` with `read()` and, if it can control fans, `set_speed()` and `set_auto()`.
-The web pages are in `web/`, served with a strict Content-Security-Policy; `web/i18n.js` holds the
-Portuguese translation.
+`alerts.py` (Discord, ntfy, Gotify, webhooks), `metrics.py` (Prometheus), `widgets.py` (what widgets may read,
+the Homarr widget), `tokens.py` (dashboard tokens), `backup.py` and `web.py` (HTTP and sessions); `app.py`
+starts it all, with the watchdog. Adding a vendor means a class in `drivers.py` with `read()`, `diagnose()`
+and, if it can control fans, `set_speed()` and `set_auto()`. The web pages are in `web/`: `app.js` (router,
+server page, controls), `editor.js` (adding servers), `alerts.js`, `integrations.js` (Prometheus, Grafana,
+Homarr, backup) and `i18n.js` (the Portuguese translation), served with a strict Content-Security-Policy.
 
 ## License
 

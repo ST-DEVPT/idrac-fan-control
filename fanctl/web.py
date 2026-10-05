@@ -1,4 +1,4 @@
-"""Sign-in sessions, Prometheus metrics and the HTTP server."""
+"""Sign-in sessions and the HTTP server."""
 
 import hashlib
 import hmac
@@ -13,10 +13,13 @@ from urllib.parse import parse_qs, urlsplit
 from . import config, tokens
 from .alerts import (ALERT_KINDS, CHANNELS, SAMPLE, alert_config, build_payload, build_report, post_webhook,
                      public_alert_config, save_alerts, send_channel, validate_alerts, webhook_of)
-from .config import DATA_DIR, INTERVAL, VERSION, WEB, write_json
+from .backup import export_config, import_config
+from .config import DATA_DIR, INTERVAL, VERSION, WEB
 from .control import validate_settings
 from .drivers import DRIVERS, DriverError, detect, scan
+from .metrics import metrics
 from .server import SERVERS, registry_lock, save_dashboard_servers, stalled, start, stop, unique_id, validate_server
+from .widgets import WIDGET_FIELDS, homarr_widget, save_widget_fields, widget_fields, widget_view
 
 KEY = b""  # set by app.main() once the data folder is known to be writable
 
@@ -76,65 +79,12 @@ def same_secret(given, expected):
     return bool(expected) and hmac.compare_digest(str(given).encode(), expected.encode())
 
 
-# ---------------------------------------------------------------- metrics
-
-def metrics(servers):
-    def esc(v):
-        return str(v).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-
-    out = {}
-
-    def add(name, help_, labels, value):
-        if value is None:
-            return
-        rows = out.setdefault(name, [f"# HELP {name} {help_}", f"# TYPE {name} gauge"])
-        lab = ",".join('%s="%s"' % (k, esc(v)) for k, v in labels.items())
-        rows.append(f"{name}{{{lab}}} {value:.15g}")
-
-    add("fanctl_info", "Build information.", {"version": VERSION}, 1)
-    for s in list(servers.values()):
-        with s.lock:
-            st = dict(s.state)
-        sens = st["sensors"] or {}
-        lbl = {"server": s.id, "name": s.name, "driver": s.driver.kind}
-        add("fanctl_up", "1 if the last BMC reading succeeded.", lbl, 0 if st["error"] or not st["updated"] else 1)
-        add("fanctl_last_update_timestamp_seconds", "Unix time of the last reading.", lbl, st["updated"])
-        add("fanctl_power_on", "1 if the server is powered on.", lbl,
-            None if st["power"] is None else int(st["power"] == "on"))
-        add("fanctl_bmc_control", "1 if the BMC's own fan control is active.", lbl,
-            None if st["effective"] is None else int(st["effective"] != "manual"))
-        add("fanctl_failsafe_active", "1 while the failsafe temperature has handed control to the BMC.",
-            lbl, int(st["failsafe"]))
-        add("fanctl_fan_speed_percent", "Fan speed set by the controller (absent in automatic mode).", lbl, st["applied_speed"])
-        add("fanctl_cpu_temperature_celsius", "Hottest CPU temperature.", lbl, st["cpu_temp"])
-        add("fanctl_inlet_temperature_celsius", "Inlet air temperature.", lbl, sens.get("inlet"))
-        add("fanctl_exhaust_temperature_celsius", "Exhaust air temperature.", lbl, sens.get("exhaust"))
-        add("fanctl_power_watts", "System power draw.", lbl, sens.get("watts"))
-        sm = st.get("smart")
-        if sm and "sensor" in sm:  # smart mode in control: what it sees and why it chose that speed
-            add("fanctl_smart_target_celsius", "Temperature smart mode aims at, for the sensor it follows.",
-                {**lbl, "sensor": sm["sensor"]}, sm["target"])
-            add("fanctl_smart_predicted_celsius", "Where that temperature is heading, 40 s on.",
-                {**lbl, "sensor": sm["sensor"]}, sm["predicted"])
-            add("fanctl_smart_trend_celsius_per_minute", "Trend of that temperature.", lbl, sm["trend"])
-            add("fanctl_smart_learned_speed_percent", "Speed the learned map gives for the current load.", lbl, sm["learned"])
-            add("fanctl_smart_trim_percent", "Correction on top of the learned map.", lbl, sm["trim"])
-            add("fanctl_smart_boost", "1 while smart mode boosts the fans ahead of a trip point.", lbl, int(sm["boost"]))
-            add("fanctl_smart_map_points", "Load levels smart mode has learned.", lbl, sm["points"])
-        for t in sens.get("temps", []):
-            add("fanctl_temperature_celsius", "Temperature sensor reading.",
-                {**lbl, "sensor": t["name"], "entity": t["entity"]}, t["value"])
-        for f in sens.get("fans", []):
-            add("fanctl_fan_rpm", "Fan speed in RPM.", {**lbl, "fan": f["name"]}, f["rpm"])
-            add("fanctl_fan_percent", "Fan speed in percent, as reported by the BMC.", {**lbl, "fan": f["name"]}, f["pct"])
-    return "\n".join(row for rows in out.values() for row in rows) + "\n"
-
-
 # ---------------------------------------------------------------- HTTP
 
 STATIC = {  # allowlist: nothing outside it is ever read from disk
     "style.css": "text/css; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
+    "editor.js": "text/javascript; charset=utf-8",
     "login.js": "text/javascript; charset=utf-8",
     "embed.js": "text/javascript; charset=utf-8",
     "alerts.js": "text/javascript; charset=utf-8",
@@ -149,28 +99,6 @@ STATIC = {  # allowlist: nothing outside it is ever read from disk
 PAGES = {"/": "index.html", "/login": "login.html", "/embed": "embed.html"}
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
        "font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; object-src 'none'")
-
-
-# ---------------------------------------------------------------- backup
-
-def export_config(secrets_too=False):
-    """Servers added in the dashboard, every server's settings, and Discord. Passwords and the
-    webhook only when asked for, since the file then unlocks every BMC."""
-    servers = []
-    for s in list(SERVERS.values()):
-        if s.cfg.get("source") != "dashboard":
-            continue
-        row = {k: s.cfg.get(k) for k in ("id", "name", "driver", "host", "username", "verify_tls")}
-        if secrets_too:
-            row["password"] = s.cfg.get("password", "")
-        servers.append(row)
-    alerts_cfg = alert_config()
-    if not secrets_too:
-        alerts_cfg = {k: v for k, v in alerts_cfg.items() if k != "webhook_url"}
-    return {"format": "fan-control-backup", "version": 1, "app": VERSION, "exported": int(time.time()),
-            "with_secrets": secrets_too, "servers": servers,
-            "settings": {s.id: s.settings() for s in list(SERVERS.values())}, "alerts": alerts_cfg,
-            "widget": {"fields": widget_fields()}}
 
 
 # ---------------------------------------------------------------- diagnostics
@@ -188,168 +116,6 @@ def diagnostics(srv):
     return {"format": "fan-control-diagnostics", "app": VERSION, "created": int(time.time()),
             "driver": srv.driver.kind, "driver_label": srv.driver.label, "model": srv.driver.model,
             "interval": INTERVAL, "settings": srv.settings(), "state": state, "events": events, "raw": raw}
-
-
-# ---------------------------------------------------------------- dashboard widgets
-
-# What a dashboard widget (Homarr, an iframe) may show. The embed token reads only these, through
-# /api/widget: never the BMC address, settings, events or error messages.
-WIDGET_FIELDS = ("status", "cpu", "fans", "power", "inlet", "exhaust", "chart", "model")
-WIDGET_FILE = DATA_DIR / "widget.json"
-
-
-def widget_fields():
-    try:
-        chosen = json.loads(WIDGET_FILE.read_text())["fields"]
-        if isinstance(chosen, list):
-            return [f for f in WIDGET_FIELDS if f in chosen]
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
-    return [f for f in WIDGET_FIELDS if f != "model"]
-
-
-def save_widget_fields(fields):
-    if not isinstance(fields, list) or not all(f in WIDGET_FIELDS for f in fields):
-        raise ValueError(f"fields must be a list drawn from {', '.join(WIDGET_FIELDS)}")
-    write_json(WIDGET_FILE, {"fields": [f for f in WIDGET_FIELDS if f in fields]})
-
-
-def widget_view(srv, fields):
-    """One server as a widget may see it: its name, and only the fields shared."""
-    now = time.time()
-    with srv.lock:
-        s = dict(srv.state)
-        hour = [p for p in srv.history if p["t"] > now - 3600]
-    sens = s["sensors"] or {}
-    out = {"id": srv.id, "name": srv.name, "updated": s["updated"]}
-    if "status" in fields:
-        stale = not s["updated"] or now - s["updated"] > INTERVAL * 4
-        mode = srv.settings()["mode"]
-        out["health"] = "error" if s["error"] or stale else "warn" if s["failsafe"] else "ok"
-        out["mode"] = ("BMC error" if s["error"] or stale else "Failsafe" if s["failsafe"]
-                       else "Monitoring" if s["effective"] == "monitor" else "Automatic" if s["effective"] == "auto"
-                       else {"fixed": "Fixed", "curve": "Curve", "smart": "Smart"}.get(mode, mode.title()))
-    if "cpu" in fields:
-        out["cpu"] = s["cpu_temp"]
-    if "fans" in fields:
-        pcts = [f["pct"] for f in sens.get("fans", []) if f["pct"] is not None]
-        rpms = [f["rpm"] for f in sens.get("fans", []) if f["rpm"] is not None]
-        out["fan_pct"] = (s["applied_speed"] if s["effective"] == "manual"
-                          else round(sum(pcts) / len(pcts)) if pcts else None)
-        out["fan_rpm"] = round(sum(rpms) / len(rpms)) if rpms else None
-    if "power" in fields:
-        out["watts"] = sens.get("watts")
-    for key in ("inlet", "exhaust"):
-        if key in fields:
-            out[key] = sens.get(key)
-    if "model" in fields:
-        out["model"] = s["model"]
-    if "chart" in fields:  # the last hour in 60 points, gaps left out
-        pts = hour[::max(1, len(hour) // 60)]
-        out["history"] = {"cpu": [p["cpu"] for p in pts if p.get("cpu") is not None],
-                          "fans": [v for p in pts if (v := p["speed"] if p.get("speed") is not None else p.get("fanpct")) is not None]}
-    return out
-
-
-# A Homarr 2.0 Custom Widget ("homarr-custom-widget-v2"): imported under Management > Custom Widgets.
-# Homarr fetches /api/widget server side with EMBED_TOKEN as a Bearer credential, which it stores
-# encrypted; the definition itself carries no secret.
-HOMARR_TEMPLATE = """<Stack gap="xs" p="sm" h="100%" style={{ minWidth: 0, minHeight: 0 }}>
-  <Group justify="space-between" wrap="nowrap"><Text size="xs" c="dimmed" tt="uppercase" fw={700}>Fan Control</Text><RefreshButton requestId="status" label="Refresh fan status" size="xs" /></Group>
-  {status.status?.loading && <Skeleton height={96} radius="md" />}
-  {status.status?.ok === false && <Alert color="red" title="Fan Control unavailable">{status.status.error || "Check the address and the EMBED_TOKEN credential, then refresh."}</Alert>}
-  {!status.status?.loading && status.status?.ok !== false && <ScrollArea style={{ flex: 1, minHeight: 0 }}><Stack gap="xs">
-    {(data.status?.servers ?? []).length === 0 && <Alert color="gray" title="No servers">Add a server in Fan Control, or check the server option.</Alert>}
-    {(data.status?.servers ?? []).map(server => <Paper key={server.id} withBorder radius="md" p="sm"><Stack gap={6}>
-      <Group justify="space-between" wrap="nowrap" gap="xs">
-        <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}><ColorSwatch size={9} withShadow={false} color={server.health === "error" ? "var(--mantine-color-red-6)" : server.health === "warn" ? "var(--mantine-color-orange-6)" : server.health === "ok" ? "var(--mantine-color-green-6)" : "var(--mantine-color-gray-6)"} /><Text fw={650} truncate>{server.name}</Text>{server.model && <Text size="xs" c="dimmed" truncate>{server.model}</Text>}</Group>
-        {server.mode && <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>{server.mode}</Text>}
-      </Group>
-      <SimpleGrid cols={3} spacing="xs">
-        {(data.status?.fields ?? []).includes("cpu") && <Stack gap={0}><Text size="xs" c="dimmed">CPU</Text><Text fw={700} size="xl">{server.cpu == null ? "—" : Math.round(options.unit === "fahrenheit" ? server.cpu * 9 / 5 + 32 : server.cpu) + (options.unit === "fahrenheit" ? " °F" : " °C")}</Text></Stack>}
-        {(data.status?.fields ?? []).includes("fans") && <Stack gap={0}><Text size="xs" c="dimmed">Fans</Text><Text fw={700} size="xl">{server.fan_pct != null ? server.fan_pct + " %" : server.fan_rpm != null ? (server.fan_rpm / 1000).toFixed(1) + "k rpm" : "—"}</Text></Stack>}
-        {(data.status?.fields ?? []).includes("power") && <Stack gap={0}><Text size="xs" c="dimmed">Power</Text><Text fw={700} size="xl">{server.watts == null ? "—" : Math.round(server.watts) + " W"}</Text></Stack>}
-      </SimpleGrid>
-      {options.chart && (server.history?.cpu?.length ?? 0) > 1 && <Sparkline h={34} data={server.history.cpu} curveType="linear" color="blue" fillOpacity={0.15} />}
-      {options.air && ((data.status?.fields ?? []).includes("inlet") || (data.status?.fields ?? []).includes("exhaust")) && <Text size="xs" c="dimmed">{(data.status?.fields ?? []).includes("inlet") ? "Inlet " + (server.inlet == null ? "—" : Math.round(options.unit === "fahrenheit" ? server.inlet * 9 / 5 + 32 : server.inlet) + (options.unit === "fahrenheit" ? " °F" : " °C")) : ""}{(data.status?.fields ?? []).includes("inlet") && (data.status?.fields ?? []).includes("exhaust") ? " · " : ""}{(data.status?.fields ?? []).includes("exhaust") ? "Exhaust " + (server.exhaust == null ? "—" : Math.round(options.unit === "fahrenheit" ? server.exhaust * 9 / 5 + 32 : server.exhaust) + (options.unit === "fahrenheit" ? " °F" : " °C")) : ""}</Text>}
-    </Stack></Paper>)}
-  </Stack></ScrollArea>}
-</Stack>"""
-
-
-def homarr_widget(base, server="all", scope="private"):
-    """The Custom Widget definition for this Fan Control, at the address Homarr will reach it on."""
-    url = urlsplit(base)
-    if url.scheme not in ("http", "https") or not url.netloc or url.path not in ("", "/") or url.query:
-        raise ValueError("base must be the address of this dashboard, like https://fans.example.com")
-    if scope not in ("private", "public", "loopback"):
-        raise ValueError("scope must be private, public or loopback")
-    if server != "all" and server not in SERVERS:
-        raise ValueError("unknown server")
-    return {
-        "$schema": "homarr-custom-widget-v2",
-        "name": "Fan Control" if server == "all" else f"Fan Control: {SERVERS[server].name}"[:100],
-        "description": "Temperatures, fan speed and power of the servers Fan Control looks after.",
-        "sources": {"default": {"name": "Fan Control", "baseUrl": f"{url.scheme}://{url.netloc}",
-                                "networkScope": scope, "auth": "bearer"}},
-        "requests": {"status": {"path": "/api/widget", "query": {"server": {"$option": "server"}}, "cacheSeconds": 10}},
-        "options": {
-            "server": {"label": "Server", "description": "A server id from Fan Control, or all", "control": "text",
-                       "default": server},
-            "unit": {"label": "Temperature unit", "control": "select", "default": "celsius",
-                     "choices": [{"label": "Celsius", "value": "celsius"}, {"label": "Fahrenheit", "value": "fahrenheit"}]},
-            "chart": {"label": "Last hour chart", "control": "switch", "default": True},
-            "air": {"label": "Inlet and exhaust air", "control": "switch", "default": True},
-        },
-        "template": HOMARR_TEMPLATE,
-    }
-
-
-def import_config(data, who="import"):
-    """Apply a backup: add the servers it has that are missing, then settings for every server
-    that exists by then, then Discord. Everything is validated as if typed in the dashboard."""
-    if not isinstance(data, dict) or data.get("format") != "fan-control-backup":
-        raise ValueError("missing format marker")
-    report = {"added": [], "updated": [], "skipped": []}
-    for row in data.get("servers", []):
-        if not isinstance(row, dict):
-            continue
-        sid = str(row.get("id", ""))
-        if sid in SERVERS:
-            report["skipped"].append(f"{row.get('name', sid)}: already here")
-            continue
-        try:
-            cfg = validate_server(row)
-        except ValueError as e:
-            report["skipped"].append(f"{row.get('name', sid)}: {e}")
-            continue
-        cfg["id"] = unique_id(sid or cfg["name"], SERVERS)
-        start(cfg).log(f"Added from a backup by {who}")
-        report["added"].append(cfg["name"])
-    if report["added"]:
-        save_dashboard_servers()
-    for sid, settings in (data.get("settings") or {}).items():
-        srv = SERVERS.get(sid)
-        if not srv:
-            continue
-        try:
-            srv.save_settings(validate_settings(settings, srv.settings()), f"{who} (backup)")
-            report["updated"].append(srv.name)
-        except (ValueError, TypeError) as e:
-            report["skipped"].append(f"{srv.name} settings: {e}")
-    if isinstance(data.get("alerts"), dict):
-        try:
-            save_alerts(validate_alerts(data["alerts"], alert_config()))
-            report["updated"].append("Discord")
-        except (ValueError, TypeError, AttributeError) as e:
-            report["skipped"].append(f"Discord: {e}")
-    if isinstance(data.get("widget"), dict):
-        try:
-            save_widget_fields(data["widget"].get("fields"))
-            report["updated"].append("Widgets")
-        except ValueError as e:
-            report["skipped"].append(f"Widgets: {e}")
-    return report
 
 
 class Handler(BaseHTTPRequestHandler):
