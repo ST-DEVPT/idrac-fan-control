@@ -173,6 +173,23 @@ def export_config(secrets_too=False):
             "widget": {"fields": widget_fields()}}
 
 
+# ---------------------------------------------------------------- diagnostics
+
+def diagnostics(srv):
+    """Everything needed to look into a server's behaviour without access to it: the raw BMC
+    answers, what was made of them, settings and recent events. No password, no BMC address."""
+    with srv.lock:
+        state = {k: v for k, v in srv.state.items() if k != "smart_map"}
+        events = list(srv.events)[:50]
+    try:
+        raw = srv.driver.diagnose()
+    except Exception as e:  # a diagnostics bug must still return what it has
+        raw = {"error": repr(e)}
+    return {"format": "fan-control-diagnostics", "app": VERSION, "created": int(time.time()),
+            "driver": srv.driver.kind, "driver_label": srv.driver.label, "model": srv.driver.model,
+            "interval": INTERVAL, "settings": srv.settings(), "state": state, "events": events, "raw": raw}
+
+
 # ---------------------------------------------------------------- dashboard widgets
 
 # What a dashboard widget (Homarr, an iframe) may show. The embed token reads only these, through
@@ -499,6 +516,16 @@ class Handler(BaseHTTPRequestHandler):
                                    "drivers": [d.info() for d in DRIVERS.values()],
                                    "auth": bool(config.WEB_PASSWORD), "version": VERSION, "interval": INTERVAL,
                                    "alerts": bool(webhook_of(alert_config()))})
+        if path.startswith("/api/servers/") and path.endswith("/diagnostics") and path.count("/") == 4:
+            srv = SERVERS.get(path.split("/")[3])
+            if srv is None:
+                return self.send(404, {"error": "unknown server"})
+            if self.role() != "admin":
+                return self.send(403, {"error": "this account can only look"})
+            report = diagnostics(srv)
+            stamp = time.strftime("%Y%m%d-%H%M")
+            return self.send(200, json.dumps(report, indent=2, ensure_ascii=False).encode(), "application/json",
+                             headers=[("Content-Disposition", f'attachment; filename="fan-control-{srv.id}-diagnostics-{stamp}.json"')])
         if path.startswith("/api/servers/") and path.count("/") == 3:
             srv = SERVERS.get(path.rsplit("/", 1)[1])
             if srv is None:

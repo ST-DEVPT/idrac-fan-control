@@ -199,6 +199,7 @@ function renderServer() {
   $("#host").textContent = s.driver === "demo" ? "simulated data" : s.host === "local" ? "local BMC" : s.host;
   $("#s-edit").hidden = s.source === "environment";
   $("#s-edit").href = "#/edit/" + encodeURIComponent(s.id);
+  $("#s-diag").href = `/api/servers/${encodeURIComponent(s.id)}/diagnostics`;
   const stale = !s.updated || Date.now() / 1000 - s.updated > s.interval * 3;
   $("#dot-link").className = "dot " + (s.error ? "bad" : stale ? "warn" : "ok");
   $("#link").textContent = s.error ? "BMC error" : stale ? "Waiting for readings" : `Read ${Math.max(0, Math.round(Date.now() / 1000 - s.updated))} s ago`;

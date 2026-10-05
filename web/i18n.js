@@ -96,6 +96,8 @@ const PT = {
   "Failsafe lasting": "Failsafe prolongado", "Fan failed": "Ventoinha avariada", "Fan commands ignored": "Comandos ignorados",
   "Room running hot": "Sala quente", "\"Room running hot\" at": "\"Sala quente\" a partir de",
   "\"Failsafe lasting\" after": "\"Failsafe prolongado\" depois de",
+  "Diagnostics": "Diagnóstico",
+  "Download what the BMC answers, without passwords or addresses, for a bug report": "Descarregar o que o BMC responde, sem passwords nem endereços, para reportar um problema",
   "Not sure? Let the BMC tell you.": "Não tem a certeza? Pergunte ao BMC.", "Detect": "Detetar",
   "Find BMCs on your network.": "Procure BMCs na sua rede.", "Scan network": "Procurar na rede", "Network range to scan": "Gama de rede a procurar",
   "Answers": "Responde a", "Suggested": "Sugestão", "Use": "Usar", "Added": "Adicionado", "Unknown": "Desconhecido",

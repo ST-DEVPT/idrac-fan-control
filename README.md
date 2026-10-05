@@ -309,6 +309,13 @@ Dashboards → New → Import, and pick your Prometheus data source.
 
 <img alt="Embed widget" src="docs/embed.jpg" width="380">
 
+## Something wrong with your hardware?
+
+On a server's page, **Diagnostics** downloads what its BMC answers, raw (`ipmitool sdr`, `sensor`, `mc info`,
+or the Redfish chassis, thermal, power and system documents), with what Fan Control made of it, the
+settings and the recent events. Passwords, the BMC address, serial numbers and network details are left
+out. Attach it to an issue: it is what's needed to support a BMC nobody has tested yet.
+
 ## Accounts and security
 
 - `WEB_PASSWORD` is the admin account. `VIEW_PASSWORD` adds a read-only one: everything is visible,

@@ -172,6 +172,16 @@ class HTTP(Base):
         finally:
             web.WIDGET_FILE.unlink(missing_ok=True)
 
+    def test_diagnostics(self):
+        st, h, data = self.get("/api/servers/rack-a/diagnostics")
+        self.assertEqual(st, 200)
+        self.assertIn("attachment", h["Content-Disposition"])
+        d = json.loads(data)
+        self.assertEqual((d["format"], d["driver"]), ("fan-control-diagnostics", "demo"))
+        self.assertNotIn("password", data.decode().lower())
+        self.assertEqual(self.get("/api/servers/nope/diagnostics")[0], 404)
+        self.assertEqual(self.req("GET", "/api/servers/rack-a/diagnostics?token=e-token")[0], 401)
+
     def test_homarr_custom_widget(self):
         st, h, data = self.get("/api/homarr-widget?base=https://fans.example.com/&server=rack-a&scope=public")
         self.assertEqual(st, 200)

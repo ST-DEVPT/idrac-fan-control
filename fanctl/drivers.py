@@ -172,6 +172,11 @@ class Driver:
     def set_pcie(self, enabled):
         raise DriverError("not supported")
 
+    def diagnose(self):
+        """What the BMC answers, as raw as possible, for a bug report about hardware this was never
+        tested on. Serial numbers, addresses and the like are taken out (see redact)."""
+        return {}
+
     @classmethod
     def info(cls):
         return {"kind": cls.kind, "label": cls.label, "vendor": cls.vendor, "description": cls.description,
@@ -206,6 +211,16 @@ class IPMIDriver(Driver):
         return r.stdout
 
     thresholds = None  # read once: `ipmitool sensor` is slow and thresholds don't change
+
+    def diagnose(self):
+        out = {}
+        for args, timeout in ((("sdr", "elist", "full"), 20), (("sensor",), 60), (("chassis", "power", "status"), 20),
+                              (("mc", "info"), 20)):
+            try:
+                out["ipmitool " + " ".join(args)] = self.ipmi(*args, timeout=timeout)
+            except DriverError as e:
+                out["ipmitool " + " ".join(args)] = f"error: {e}"
+        return out
 
     def read(self):
         if self.thresholds is None:
@@ -358,6 +373,26 @@ class RedfishDriver(Driver):
         except (urllib.error.URLError, OSError, ValueError) as e:
             raise DriverError(f"Redfish {path}: {getattr(e, 'reason', e)}") from e
 
+    def diagnose(self):
+        out = {}
+
+        def grab(path):
+            try:
+                out[path] = redact(self.get(path))
+                return out[path]
+            except DriverError as e:
+                out[path] = f"error: {e}"
+                return {}
+
+        grab("/redfish/v1")
+        for collection in ("/redfish/v1/Chassis", "/redfish/v1/Systems"):
+            for member in (grab(collection).get("Members") or [])[:2]:
+                item = grab(member.get("@odata.id", ""))
+                for link in ("Thermal", "Power"):
+                    if (item.get(link) or {}).get("@odata.id"):
+                        grab(item[link]["@odata.id"])
+        return out
+
     def discover(self):
         chassis = self.get("/redfish/v1/Chassis")["Members"][0]["@odata.id"]
         c = self.get(chassis)
@@ -423,6 +458,14 @@ class ILO4UnlockedDriver(RedfishDriver):
         data = super().read()
         self.fan_count = len(data["fans"]) or self.fan_count
         return data
+
+    def diagnose(self):
+        out = super().diagnose()
+        try:
+            out["ssh fan info"] = self.ssh("fan info")
+        except DriverError as e:
+            out["ssh fan info"] = f"error: {e}"
+        return out
 
     def caps(self, value):
         """Cap every PWM at value (0-255). The iLO's own control still runs underneath the cap."""
@@ -525,6 +568,19 @@ def suggest(vendor, product, firmware):
     if vendor or product:
         return "redfish", f"{(vendor or product).strip()}: monitored over Redfish."
     return None, "The BMC did not say who made it."
+
+
+SENSITIVE = re.compile(r"serial|uuid|asset|mac|password|hostname|fqdn|ipv4|ipv6|address|sku|partnumber|location", re.I)
+
+
+def redact(obj):
+    """A Redfish document without what identifies the machine or its network."""
+    if isinstance(obj, dict):
+        return {k: "<redacted>" if SENSITIVE.search(k) and not isinstance(v, (dict, list)) else redact(v)
+                for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [redact(v) for v in obj]
+    return obj
 
 
 def describe_root(root):

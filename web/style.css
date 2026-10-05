@@ -565,7 +565,7 @@ a.btn.primary { color: var(--bg); }
 body.viewer .ro-badge { display: inline; }
 body.viewer .actions, body.viewer #s-edit, body.viewer .side-add, body.viewer a[href="#/add"],
 body.viewer .card.add, body.viewer .al-actions, body.viewer .curve-presets, body.viewer #test-alert,
-body.viewer #smart-forget { display: none !important; }
+body.viewer #smart-forget, body.viewer #s-diag { display: none !important; }
 body.viewer #control-body, body.viewer .alerts .al-grid, body.viewer .detect { pointer-events: none; opacity: .75; }
 
 /* language and unit */

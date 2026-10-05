@@ -218,6 +218,35 @@ class Redirects(unittest.TestCase):
         srv.server_close()
 
 
+class Diagnostics(unittest.TestCase):
+    def test_redact(self):
+        doc = {"Model": "ProLiant DL360 Gen9", "SerialNumber": "CZ1234", "UUID": "x",
+               "EthernetInterfaces": {"@odata.id": "/redfish/v1/Managers/1/EthernetInterfaces"},
+               "Oem": {"Hp": {"HostName": "ilo-rack", "Fans": [{"MACAddress": "aa:bb"}]}}}
+        r = drivers.redact(doc)
+        self.assertEqual(r["Model"], "ProLiant DL360 Gen9")
+        self.assertEqual((r["SerialNumber"], r["Oem"]["Hp"]["HostName"], r["Oem"]["Hp"]["Fans"][0]["MACAddress"]),
+                         ("<redacted>",) * 3)
+        self.assertEqual(r["EthernetInterfaces"]["@odata.id"], "/redfish/v1/Managers/1/EthernetInterfaces")
+
+    def test_redfish_walk(self):
+        docs = {"/redfish/v1": {"RedfishVersion": "1.0.0"},
+                "/redfish/v1/Chassis": {"Members": [{"@odata.id": "/redfish/v1/Chassis/1/"}]},
+                "/redfish/v1/Chassis/1/": {"Thermal": {"@odata.id": "/redfish/v1/Chassis/1/Thermal/"}, "SerialNumber": "S"},
+                "/redfish/v1/Chassis/1/Thermal/": ILO_THERMAL,
+                "/redfish/v1/Systems": {"Members": []}}
+        rf = drivers.RedfishDriver("10.0.0.9")
+
+        def get(path):
+            if path not in docs:
+                raise drivers.DriverError("HTTP 404")
+            return docs[path]
+        rf.get = get
+        out = rf.diagnose()
+        self.assertEqual(out["/redfish/v1/Chassis/1/Thermal/"]["Fans"][0]["FanName"], "Fan 1")
+        self.assertEqual(out["/redfish/v1/Chassis/1/"]["SerialNumber"], "<redacted>")
+
+
 class Detection(unittest.TestCase):
     def test_suggestions(self):
         cases = [
