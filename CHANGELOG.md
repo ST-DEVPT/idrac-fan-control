@@ -3,6 +3,28 @@
 Versions follow [semantic versioning](https://semver.org): a major version (`:2`) never removes a setting
 or changes what an existing one does, so pinning the image to it is safe.
 
+## [2.2.0] - 2026-10-05
+
+- **Watchdog.** A control loop that stops turning for 3 minutes hands every fan back to its BMC and
+  restarts the process. The health check follows the control loops (`/livez`), not the BMCs.
+  `scripts/fan-guard.sh`, run from the host's cron, hands Dell fans back to the iDRAC when the container
+  itself is gone.
+- **Fans are checked.** New alerts for a fan that stops while the others spin, a BMC whose fans do not
+  follow a 20-point speed change within 30 s, a failsafe that lasts longer than a set time, and inlet air
+  above a warning temperature.
+- **Alerts on ntfy, Gotify and any webhook**, besides Discord. The page is now called Alerts.
+- **Tokens in the dashboard.** Widget and metrics tokens are created and revoked on the Homarr and
+  Prometheus pages, shown once and stored as a hash.
+- **Schedule.** Up to 8 profiles by day and time, each with a speed cap and/or a smart mode target.
+- **Diagnostics.** A server page downloads what its BMC answers, without passwords or addresses, for bug
+  reports about untested hardware.
+- **Smart mode metrics** in Prometheus, and two Grafana panels that show why it chose each speed.
+- The sidebar shows when a newer release is out (`UPDATE_CHECK=false` turns it off).
+- The docs pin the image to its major version, `:2`.
+- A test fails on any page text without a Portuguese translation; the 40 it found are translated.
+- Code: `metrics.py`, `widgets.py`, `backup.py`, `tokens.py` and `updates.py` come out of `web.py`;
+  `editor.js` out of `app.js`.
+
 ## [2.1.0] - 2026-10-05
 
 - **Smart mode, rebuilt.** It learns the fan speed each heat load needs on your server and goes straight
