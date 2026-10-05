@@ -124,13 +124,20 @@
         </div>
       </div>
       <div class="panel" data-panel="smart">
-        <p class="help">Finds the slowest speed that holds the CPU at the target, and keeps every other sensor clear
-          of its limits. Rises quickly when it has to, falls slowly so you don't hear it hunting.</p>
+        <p class="help">Holds the CPU at the target with as little fan as it can, and keeps every other sensor clear
+          of its limits. It learns the speed each load needs, sees heat coming before it arrives, and rides out
+          short bursts instead of hunting.</p>
         <div class="slider">
           <input type="range" id="smart-target" min="40" max="85" step="1" aria-label="CPU target temperature">
           <output id="smart-out">—</output>
         </div>
-        <p class="help" id="smart-live"></p>
+        <p class="help smart-live" id="smart-live"></p>
+        <p class="help smart-live" id="smart-detail"></p>
+        <div class="smart-map" id="smart-map" hidden>
+          <div class="smart-map-hd"><span>Learned: the speed each power draw needs</span>
+            <button type="button" class="inline-btn" id="smart-forget">Forget</button></div>
+          <div class="curve-box"><svg id="smart-svg" viewBox="0 0 400 150" aria-label="Learned fan speed by power draw"></svg></div>
+        </div>
       </div>
       <div class="panel" data-panel="curve">
         <p class="help">Drag the points. Double-click empty space to add a point, or a point to remove it.</p>
@@ -168,7 +175,7 @@
           <div class="num"><input type="number" id="min-speed" min="0" max="60" step="1"><span class="muted">%</span></div>
         </div>
         <div class="f">
-          <label for="ramp">Ramp-down delay<small>Fans speed up at once, slow down after this long</small></label>
+          <label for="ramp">Ramp-down delay<small>Fans speed up at once, slow down only after lower demand lasts this long</small></label>
           <div class="num"><input type="number" id="ramp" min="0" max="600" step="5"><span class="muted">s</span></div>
         </div>
         <div class="f quiet-row">
@@ -360,33 +367,54 @@
   <header class="page-head">
     <div>
       <h1>Homarr</h1>
-      <p class="lede">A read-only widget for Homarr or any dashboard that can show a web page, plus a status check for app tiles.</p>
+      <p class="lede">A native widget for Homarr 2.0, an iFrame widget for any dashboard, and a status check for app tiles. You choose what they may show.</p>
     </div>
     <span class="status-pill" id="hm-status"></span>
   </header>
   <div class="int-grid">
     <div class="int-main">
       <section class="int-step" id="hm-enable" hidden>
-        <h2><span class="n">1</span> Turn on the widget</h2>
-        <p>The widget opens with a token instead of the dashboard password, and the token can only read. Add one to
-          <code>docker-compose.yml</code> and recreate the container:</p>
+        <h2><span class="n hm-n">1</span> Turn on widgets</h2>
+        <p>Widgets read with a token instead of the dashboard password, and the token reads only what you share
+          below. Add one to <code>docker-compose.yml</code> and recreate the container:</p>
         <div class="code"><pre id="hm-env"></pre><button class="copy" data-copy="hm-env">Copy</button></div>
       </section>
       <section class="int-step">
-        <h2><span class="n" id="hm-n-build">2</span> Build the widget address</h2>
+        <h2><span class="n hm-n">2</span> Choose what widgets may show</h2>
+        <p>The token reads these and nothing else: never the BMC address, settings, events or error messages.</p>
+        <div class="share" id="hm-fields"></div>
+      </section>
+      <section class="int-step">
+        <h2><span class="n hm-n">3</span> Homarr 2.0: native widget</h2>
+        <p>A Custom Widget that Homarr fetches itself, with its own options for the server, unit, chart and air temperatures.</p>
+        <div class="builder">
+          <label>Server<select id="hm-cw-server"></select></label>
+          <label>Homarr reaches this address over<select id="hm-scope"><option value="private">Your network</option><option value="public">The internet</option><option value="loopback">The same machine</option></select></label>
+          <label>Address Homarr uses<input id="hm-base" spellcheck="false" autocomplete="off"></label>
+        </div>
+        <p><a class="btn" id="hm-download" download="fan-control-homarr-widget.json">Download widget</a></p>
+        <ol class="int-list">
+          <li>In Homarr, open <b>Management → Custom Widgets</b> and import the file.</li>
+          <li>For the source credential pick <b>Bearer</b> and paste your <code>EMBED_TOKEN</code>. Homarr keeps it encrypted.</li>
+          <li>Edit a board, choose <b>Add board content</b> and pick <b>Fan Control</b>.</li>
+        </ol>
+      </section>
+      <section class="int-step">
+        <h2><span class="n hm-n">4</span> Any dashboard: iFrame widget</h2>
         <div class="builder">
           <label>Server<select id="hm-server"></select></label>
           <label>Theme<select id="hm-theme"><option value="">Follow the viewer</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
           <label>Background<select id="hm-bg"><option value="">Transparent</option><option value="solid">Solid</option></select></label>
         </div>
+        <div class="share" id="hm-show"></div>
         <div class="code"><pre id="hm-url"></pre><button class="copy" data-copy="hm-url">Copy</button></div>
         <p class="hint">Replace <code>&lt;EMBED_TOKEN&gt;</code> with the value from <code>docker-compose.yml</code>; the dashboard never shows it.</p>
+        <p>In Homarr, add an <b>iFrame</b> widget and paste the address. Any size works: a short frame drops the chart first, then the footer.</p>
       </section>
       <section class="int-step">
-        <h2><span class="n" id="hm-n-add">3</span> Add it to Homarr</h2>
-        <p>Edit the board, add an <b>iFrame</b> widget and paste the address. About 380 × 230 fits it.</p>
-        <p>For an <b>app tile</b>, point it at this dashboard and use the status check below, which answers
-          <code>200</code> while every server is being read:</p>
+        <h2><span class="n hm-n">5</span> App tile status</h2>
+        <p>For an app tile, use this as its status check. It answers <code>200</code> while every BMC answers, and
+          <code>503</code> as soon as one stops.</p>
         <div class="code"><pre id="hm-health"></pre><button class="copy" data-copy="hm-health">Copy</button></div>
       </section>
     </div>

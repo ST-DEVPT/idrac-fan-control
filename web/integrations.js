@@ -88,32 +88,68 @@ async function renderGrafana() {
 }
 
 // ---------------------------------------------------------------- Homarr
+const WIDGET_LABELS = { status: "Status and mode", cpu: "CPU temperature", fans: "Fan speed", power: "Power draw",
+  inlet: "Inlet air", exhaust: "Exhaust air", chart: "Last hour chart", model: "Server model" };
+
 function renderHomarr() {
   setStatus("#hm-status", integ.embed_token, integ.embed_token ? "Enabled" : "Off");
   $("#hm-enable").hidden = integ.embed_token;
-  $("#hm-n-build").textContent = integ.embed_token ? "1" : "2";
-  $("#hm-n-add").textContent = integ.embed_token ? "2" : "3";
+  $$(".hm-n").filter(n => !n.closest("[hidden]")).forEach((n, i) => n.textContent = i + 1);
   $("#hm-env").textContent = `environment:\n  EMBED_TOKEN: ${randomToken()}`;
-  const sel = $("#hm-server"), keep = sel.value;
-  sel.innerHTML = integ.servers.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")
-    || '<option value="">No servers yet</option>';
-  if (integ.servers.some(s => s.id === keep)) sel.value = keep;
+  const options = integ.servers.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
+  for (const sel of ["#hm-server", "#hm-cw-server"]) {
+    const keep = $(sel).value;
+    $(sel).innerHTML = '<option value="all">All servers</option>' + options;
+    $(sel).value = [...$(sel).options].some(o => o.value === keep) ? keep : integ.servers[0]?.id || "all";
+  }
+  if (!$("#hm-base").value) $("#hm-base").value = location.origin;
+  if (!$("#hm-scope").dataset.set) $("#hm-scope").value = /^(localhost|127\.|\[::1\])/.test(location.hostname) ? "loopback" : "private";
+  $("#hm-fields").innerHTML = integ.widget_all.map(f => `<label><input type="checkbox" data-field="${f}"
+    ${integ.widget_fields.includes(f) ? "checked" : ""}> ${translate(WIDGET_LABELS[f] || f)}</label>`).join("");
+  const keepShow = new Set($$("#hm-show input:not(:checked)").map(i => i.dataset.show));
+  $("#hm-show").innerHTML = integ.widget_fields.length ? integ.widget_fields.map(f => `<label><input type="checkbox" data-show="${f}"
+    ${keepShow.has(f) ? "" : "checked"}> ${translate(WIDGET_LABELS[f] || f)}</label>`).join("") : `<span class="hint">${translate("Nothing is shared yet.")}</span>`;
   $("#hm-health").textContent = `${location.origin}/healthz`;
   buildWidget();
 }
 
 function buildWidget() {
-  const q = new URLSearchParams();
-  if ($("#hm-server").value) q.set("server", $("#hm-server").value);
+  const q = new URLSearchParams({ server: $("#hm-server").value || "all" });
   if ($("#hm-theme").value) q.set("theme", $("#hm-theme").value);
   if ($("#hm-bg").value) q.set("bg", $("#hm-bg").value);
+  const shown = $$("#hm-show input:checked").map(i => i.dataset.show);
+  if (shown.length < $$("#hm-show input").length) q.set("show", shown.join(","));
   const preview = "/embed?" + q;
   q.set("token", "TOKEN");
   $("#hm-url").textContent = `${location.origin}/embed?${q}`.replace("TOKEN", "<EMBED_TOKEN>");
   if ($("#hm-frame").getAttribute("src") !== preview) $("#hm-frame").src = preview;
   $("#hm-board").className = "board " + ($("#hm-theme").value || "auto");
+  const d = new URLSearchParams({ base: $("#hm-base").value.trim().replace(/\/+$/, ""), server: $("#hm-cw-server").value || "all",
+    scope: $("#hm-scope").value });
+  $("#hm-download").href = "/api/homarr-widget?" + d;
 }
-["#hm-server", "#hm-theme", "#hm-bg"].forEach(s => $(s).addEventListener("change", buildWidget));
+["#hm-server", "#hm-theme", "#hm-bg", "#hm-cw-server", "#hm-base"].forEach(s => $(s).addEventListener("input", buildWidget));
+$("#hm-scope").addEventListener("change", () => { $("#hm-scope").dataset.set = "1"; buildWidget(); });
+$("#hm-show").addEventListener("change", buildWidget);
+$("#hm-download").addEventListener("click", async e => {
+  // check the address first, so a typo shows here and not as an unreadable download
+  e.preventDefault();
+  const r = await api($("#hm-download").getAttribute("href"));
+  if (!r.ok) return toast((await r.json().catch(() => ({}))).error || "Could not build the widget", true);
+  const url = URL.createObjectURL(await r.blob());
+  const a = Object.assign(document.createElement("a"), { href: url, download: "fan-control-homarr-widget.json" });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+$("#hm-fields").addEventListener("change", async () => {
+  const fields = $$("#hm-fields input:checked").map(i => i.dataset.field);
+  const r = await api("/api/widget-config", { fields });
+  if (!r.ok) return toast((await r.json().catch(() => ({}))).error || "Could not save", true);
+  integ.widget_fields = (await r.json()).fields;
+  toast("Widgets updated");
+  renderHomarr();
+  $("#hm-frame").contentWindow?.location.reload();
+});
 
 // ---------------------------------------------------------------- copy buttons
 document.addEventListener("click", async e => {

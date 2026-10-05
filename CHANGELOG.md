@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.1.0]
+
+- **Smart mode, rebuilt.** It learns the fan speed each heat load needs on your server and goes straight
+  there when the load changes. It judges temperatures where their trend puts them 40 s on, so heat is met
+  before it arrives. It keeps a PI trim on top, which the learned map slowly takes over. Heat load is power
+  draw over the room between the inlet air and the target, so a warm day or a new target needs no
+  relearning.
+- Smart mode rides out bursts: fans fall only after lower demand has lasted the ramp-down delay. In a
+  simulated job that runs 30 s of every 90 s, the fans travel less than half as far.
+- Smart mode boosts the fans when anything heads for its trip point, and quiet hours give way gradually
+  near a trip point. In simulation the failsafe no longer trips under a quiet-hours cap that is too low
+  for the load.
+- Smart mode no longer chases the inlet air temperature, which no fan speed can lower.
+- The server page shows what smart mode is doing (trend, learned speed) and draws what it has learned,
+  with a button to forget it. The map is kept in `smart-<server>.json` in the data folder.
+- The event log records speed changes from 5 % on, so slow ramps no longer push everything else out.
+- Portuguese: text that wraps over several lines in the page is translated too.
+- **Homarr**: choose what widgets may show (status, CPU, fans, power, inlet, exhaust, chart, model). The
+  embed token now reads only those, through the new `/api/widget`; it no longer opens `/api/state` or
+  `/api/history`, which carried the BMC address, settings and events.
+- **Native Homarr 2.0 widget**: a Custom Widget to import, which Homarr fetches itself with the token as a
+  Bearer credential. It has options for the server or the whole rack, °C or °F, the chart and the air.
+- The iFrame widget fits any frame: the chart gives way first, then the footer, instead of being cut. It
+  can show the whole rack, and only the fields you pick.
+- `/healthz` answers `503` when a BMC stops answering, not only when the controller stalls, so a Homarr
+  app tile goes red when it should.
+- Fixed: opening the Prometheus, Grafana or Homarr page directly could leave it empty.
+
 ## [2.0.1]
 
 - Redfish: follow redirects that stay on the same BMC. HPE iLO 4 answers `/redfish/v1/Chassis` with a

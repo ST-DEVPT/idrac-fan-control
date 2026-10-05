@@ -18,14 +18,16 @@ everything else.
 
 - **Every server in one place**: an overview of the rack and a page per server. Scan your network for BMCs,
   let each one tell its vendor and firmware, test the connection, add it.
-- **Smart mode**: finds the slowest fan speed that holds the CPU at a target and keeps every other sensor
-  clear of its limits. Or draw a curve, or pick a fixed speed.
+- **Smart mode**: holds the CPU at a target with as little fan as it can. It learns the speed each load
+  needs on your server, sees heat coming before it arrives and rides out short bursts. Or draw a curve, or
+  pick a fixed speed.
 - **Safe by design**: the BMC takes over on a CPU failsafe, on hot exhaust air, when any sensor nears the
   warning level its BMC defines, on missing readings, refused commands, crashes and `docker stop`.
   A minimum speed and a dry-run mode for trying things out.
 - **Quiet hours**, ramp-down smoothing, curve presets, and 3 h / 24 h / 7 d history that survives restarts.
 - **Discord** alerts you can fully customise, and a status card that keeps itself up to date.
-- **Prometheus**, a ready-made **Grafana** dashboard, a **Homarr** widget, each with its own setup page.
+- **Prometheus**, a ready-made **Grafana** dashboard, and **Homarr** widgets (a native Homarr 2.0 widget and
+  an iFrame for any dashboard) that show only what you choose, each with its own setup page.
 - **Read-only accounts**, backups, English or Portuguese, °C or °F.
 - **Small and private**: plain Python, no dependencies, no third-party requests, runs as non-root.
 
@@ -108,7 +110,7 @@ Servers, fan settings and Discord are configured in the dashboard. The environme
 | `CHECK_INTERVAL` | `15` | Seconds between readings and fan commands. Minimum 5 |
 | `DISCORD_WEBHOOK_URL` | empty | Default Discord webhook. A webhook pasted in the dashboard takes precedence |
 | `METRICS_TOKEN` | empty | Enables `/metrics` for Prometheus, with `Authorization: Bearer <token>` |
-| `EMBED_TOKEN` | empty | Enables the read-only `/embed` widget with `?token=<token>` |
+| `EMBED_TOKEN` | empty | Enables the widgets: `/embed?token=<token>`, and `/api/widget` with the token as a Bearer credential |
 | `TRUST_PROXY` | off | Set to `true` behind a reverse proxy, so sign-in limits and the event log use `X-Forwarded-For` |
 | `PORT` | `8080` | HTTP port inside the container |
 
@@ -156,15 +158,31 @@ For servers whose type has fan control (Dell, Supermicro, unlocked iLO 4):
 | **Automatic** | The BMC runs its factory profile. Loudest, and the fallback for every problem |
 | **Fixed** | Every fan at one speed |
 | **Curve** | Speed follows the hottest CPU along points you drag. Start from a preset (quiet, balanced, cool, storage) or copy another server's curve |
-| **Smart** | Finds the slowest speed that holds the CPU at a target you set, and keeps every other sensor clear of its limits |
+| **Smart** | Holds the CPU at a target you set with as little fan as it can, learning what each load needs, and keeps every other sensor clear of its limits |
 
 ### Smart mode
 
-A PI controller (proportional and integral) looks at the CPU against its target, the exhaust air against
-8 °C below its limit, and every sensor with a BMC warning threshold against 8 °C below the point where the
-failsafe would trip. It follows whichever is worst. It may raise the speed by 15 % in one step, lowers it by
-at most 0.2 % per second, and ignores corrections under 2 %, so you don't hear it hunting. At idle it rests
-on the minimum speed.
+Smart mode watches the CPU against its target, the exhaust air against 8 °C below its limit, and every
+sensor with a BMC warning threshold against 8 °C below the point where the failsafe would trip. Inlet air
+is left out: no fan speed cools the room. It answers to whichever is worst, in four ways:
+
+- **It learns your server.** Whenever a load has been held steady at the target for a minute, it remembers
+  the fan speed that did it, against the heat load: power draw over the room left between the inlet air
+  and the target. When that load comes back, the fans go straight to what worked last time instead of
+  waiting for the heat. A warm day or a new target needs no relearning, because the heat load already
+  accounts for both. The server page draws what it has learned; **Forget** starts it afresh. It learns
+  nothing during a dry run.
+- **It looks ahead.** Each temperature is judged where its trend over the last minute puts it 40 seconds
+  later, so a CPU that is climbing gets air before it arrives.
+- **It corrects itself.** A proportional and integral trim on top fixes what the learned map gets wrong,
+  and the map slowly takes the correction over.
+- **It stays quiet.** Fans rise at once, but fall only after lower demand has lasted the ramp-down delay,
+  and then slowly, so a job that comes and goes every minute leaves them steady. Corrections under 2 %
+  are ignored. At idle it rests on the minimum speed.
+
+When something heads for its trip point, smart mode **boosts** the fans by 25 % at once, so the BMC rarely
+has to take over. During quiet hours the cap gives way gradually from 8 °C below a trip point: louder fans
+beat a failsafe.
 
 ### Protection
 
@@ -185,8 +203,8 @@ to the BMC. Use it to try a new server type or a new curve.
 
 ### Smoothing and quiet hours
 
-**Ramp-down delay** (curve and fixed modes): fans speed up at once but slow down only after the lower speed
-has been asked for during the whole delay. It never runs the fans slower than the curve.
+**Ramp-down delay**: fans speed up at once but slow down only after the lower speed has been asked for
+during the whole delay. It never runs the fans slower than the curve. Smart mode uses it the same way.
 
 **Quiet hours** cap the speed between two times of day, for example 23:00 to 07:00 at 25 %. Protection
 still applies at any hour.
@@ -260,9 +278,18 @@ scrape_configs:
 **Grafana**: download the dashboard from the Grafana page (or `web/grafana.json`), then
 Dashboards → New → Import, and pick your Prometheus data source.
 
-**Homarr** (or any dashboard that shows a web page): set `EMBED_TOKEN`; the page builds the widget address
-for the server, theme and background you pick, with a live preview. Add it as an *iFrame* widget, and use
-`/healthz` as the status check of an app tile.
+**Homarr**: set `EMBED_TOKEN`, then on the Homarr page:
+
+1. **Choose what widgets may show**: status, CPU, fans, power, inlet and exhaust air, the last-hour chart,
+   the server model. The token reads those fields and nothing else: never the BMC address, settings,
+   events or error messages.
+2. **Homarr 2.0**: download the native widget, import it under *Management → Custom Widgets*, and give it
+   `EMBED_TOKEN` as its Bearer credential. Homarr fetches `/api/widget` itself; the widget has options for
+   the server (or all of them), °C or °F, the chart and the air temperatures.
+3. **Any dashboard**: the page builds an *iFrame* address for one server or the whole rack, a theme, a
+   background and the fields to show, with a live preview. Any frame size works: a short one drops the
+   chart first, then the footer.
+4. **App tile**: `/healthz` answers `200` while every BMC answers and `503` as soon as one stops.
 
 <img alt="Embed widget" src="docs/embed.jpg" width="380">
 

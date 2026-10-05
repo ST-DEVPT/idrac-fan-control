@@ -238,18 +238,27 @@ body.login { display: grid; grid-template-rows: 1fr auto; min-height: 100vh; }
 /* ---------- embed (dashboard widgets, e.g. Homarr) ---------- */
 body.embed { background: transparent; }
 body.embed.solid { background: var(--bg); }
-.emb { padding: 14px 16px; display: grid; gap: 10px; }
-.emb .head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+html:has(body.embed), body.embed { height: 100%; }
+.emb { box-sizing: border-box; height: 100%; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.emb .head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; min-width: 0; }
 .emb .head b { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.emb .head .model { color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .emb .head .mode { margin-left: auto; color: var(--ink-3); white-space: nowrap; }
-.emb .nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.emb .nums { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 12px; }
 .emb .n label { display: block; font-size: 11.5px; color: var(--ink-3); }
-.emb .n div { font-size: 30px; line-height: 1.05; font-stretch: 78%; font-weight: 450; white-space: nowrap; }
-.emb .n div small { font-size: 13px; color: var(--ink-3); font-stretch: 100%; margin-left: 2px; }
-.emb .n div.hot { color: var(--accent); }
-.emb svg { display: block; width: 100%; height: 40px; }
-.emb .row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-3); }
+.emb .n div { font-size: clamp(22px, 9vh, 30px); line-height: 1.05; font-stretch: 78%; font-weight: 450; white-space: nowrap; }
+.emb .n div small, .emb.rack td small { font-size: 13px; color: var(--ink-3); font-stretch: 100%; margin-left: 2px; }
+.emb .spark { display: block; width: 100%; flex: 1 1 0; min-height: 0; max-height: 80px; }
+.emb .row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; }
 .emb .row b { font-weight: 500; color: var(--ink-2); }
+/* the frame decides: a short one drops the chart, a shorter one the footer too */
+@media (max-height: 150px) { .emb .spark { display: none; } }
+@media (max-height: 105px) { .emb .row { display: none; } .emb { gap: 6px; padding: 8px 12px; } }
+.emb.rack { overflow: auto; }
+.emb.rack table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.emb.rack th { text-align: right; font-weight: 400; font-size: 11.5px; color: var(--ink-3); padding: 0 0 4px 10px; }
+.emb.rack td { text-align: right; padding: 5px 0 5px 10px; border-top: 1px solid var(--rule); white-space: nowrap; font-size: 16px; font-stretch: 85%; }
+.emb.rack td:first-child { text-align: left; padding-left: 0; font-size: 13px; font-stretch: 100%; max-width: 0; width: 40%; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- Discord alerts ---------- */
 .alerts { padding: 22px 0 30px; border-bottom: 1px solid var(--rule); }
@@ -555,7 +564,8 @@ a.btn.primary { color: var(--bg); }
 .ro-badge { display: none; padding: 1px 7px; border: 1px solid var(--rule-2); border-radius: 999px; font-size: 11px; }
 body.viewer .ro-badge { display: inline; }
 body.viewer .actions, body.viewer #s-edit, body.viewer .side-add, body.viewer a[href="#/add"],
-body.viewer .card.add, body.viewer .al-actions, body.viewer .curve-presets, body.viewer #test-alert { display: none !important; }
+body.viewer .card.add, body.viewer .al-actions, body.viewer .curve-presets, body.viewer #test-alert,
+body.viewer #smart-forget { display: none !important; }
 body.viewer #control-body, body.viewer .alerts .al-grid, body.viewer .detect { pointer-events: none; opacity: .75; }
 
 /* language and unit */
@@ -569,3 +579,21 @@ body.viewer #control-body, body.viewer .alerts .al-grid, body.viewer .detect { p
 .scan-table { font-size: 13px; }
 .scan-table td { padding: 7px 8px 7px 0; }
 .scan-table .mono { font-size: 12.5px; }
+
+/* smart mode */
+.smart-live { margin: 6px 0 0; }
+.smart-live:empty { display: none; }
+.smart-map { max-width: 560px; margin-top: 16px; }
+.smart-map-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px;
+  font-size: 12.5px; color: var(--ink-2); }
+.smart-map .curve-box { touch-action: auto; }
+.smart-map .dot-pt { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
+
+/* homarr page: what widgets may show */
+.share { display: flex; flex-wrap: wrap; gap: 6px 16px; max-width: 760px; margin: 4px 0 14px; font-size: 13.5px; color: var(--ink-2); }
+.share label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.share input { accent-color: var(--accent); }
+.builder input { padding: 8px 9px; border: 1px solid var(--rule-2); border-radius: 6px; background: var(--surface); color: var(--ink); font: 13.5px var(--sans); min-width: 0; }
+a.btn { display: inline-block; color: var(--ink); text-decoration: none; }
+.int-list { margin: 10px 0 0; padding-left: 20px; color: var(--ink-2); max-width: 70ch; line-height: 1.7; }
+body.viewer #hm-fields { pointer-events: none; opacity: .6; }

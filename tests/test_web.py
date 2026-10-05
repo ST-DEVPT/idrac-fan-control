@@ -143,10 +143,62 @@ class HTTP(Base):
         self.assertEqual(st, 200)
         self.assertIn("frame-ancestors *", h["Content-Security-Policy"])
         self.assertNotIn("X-Frame-Options", h)
-        self.assertEqual(self.req("GET", "/api/state?server=rack-a&token=e-token")[0], 200)
-        self.assertEqual(self.req("GET", "/api/state?token=wrong")[0], 401)
+        self.assertEqual(self.req("GET", "/api/state?server=rack-a&token=e-token")[0], 401)  # widget data only
+        self.assertEqual(self.req("GET", "/api/history?server=rack-a&token=e-token")[0], 401)
+        self.assertEqual(self.req("GET", "/api/widget?token=wrong")[0], 401)
         self.assertEqual(self.req("POST", "/api/settings?token=e-token", {"mode": "auto"})[0], 401)
         self.assertEqual(self.req("GET", "/api/overview?token=e-token")[0], 401)
+
+    def test_widget_shares_only_what_was_chosen(self):
+        st, _, data = self.req("GET", "/api/widget?server=rack-a&token=e-token")
+        w = json.loads(data)
+        self.assertEqual(st, 200)
+        one = w["servers"][0]
+        self.assertEqual((one["id"], one["health"]), ("rack-a", "ok"))
+        self.assertIn("cpu", one)
+        self.assertNotIn("model", one)                       # off unless chosen
+        self.assertTrue(one["history"]["cpu"])
+        for secret in ("host", "error", "settings", "events", "reason"):
+            self.assertNotIn(secret, one)
+        st, _, data = self.req("GET", "/api/widget", headers={"Authorization": "Bearer e-token"})  # Homarr's way
+        self.assertEqual((st, len(json.loads(data)["servers"])), (200, len(SERVERS)))
+        self.assertEqual(self.req("GET", "/api/widget?server=nope&token=e-token")[0], 404)
+        try:
+            self.assertEqual(self.post("/api/widget-config", {"fields": ["cpu", "model"]})[0], 200)
+            one = json.loads(self.req("GET", "/api/widget?server=rack-a&token=e-token")[2])["servers"][0]
+            self.assertEqual(set(one), {"id", "name", "updated", "cpu", "model"})
+            self.assertEqual(self.post("/api/widget-config", {"fields": ["password"]})[0], 400)
+            self.assertEqual(self.req("POST", "/api/widget-config?token=e-token", {"fields": []})[0], 401)
+        finally:
+            web.WIDGET_FILE.unlink(missing_ok=True)
+
+    def test_homarr_custom_widget(self):
+        st, h, data = self.get("/api/homarr-widget?base=https://fans.example.com/&server=rack-a&scope=public")
+        self.assertEqual(st, 200)
+        self.assertIn("attachment", h["Content-Disposition"])
+        d = json.loads(data)
+        self.assertEqual(d["$schema"], "homarr-custom-widget-v2")
+        self.assertEqual(d["sources"]["default"], {"name": "Fan Control", "baseUrl": "https://fans.example.com",
+                                                   "networkScope": "public", "auth": "bearer"})
+        self.assertEqual(d["options"]["server"]["default"], "rack-a")
+        self.assertIn('requestId="status"', d["template"])
+        for opt in d["options"].values():
+            self.assertTrue({"label", "control", "default"} <= set(opt))
+        self.assertNotIn("e-token", data.decode())                           # Homarr holds the credential
+        for bad in ("base=javascript:alert(1)", "base=https://x/path", "base=https://x&scope=wide",
+                    "base=https://x&server=nope"):
+            self.assertEqual(self.get("/api/homarr-widget?" + bad)[0], 400)
+        self.assertEqual(self.req("GET", "/api/homarr-widget?base=https://x&token=e-token")[0], 401)
+
+    def test_health_reports_a_silent_bmc(self):
+        srv = SERVERS["rack-a"]
+        srv.state["error"] = "Redfish /redfish/v1: timed out"
+        try:
+            st, _, data = self.req("GET", "/healthz")
+            self.assertEqual((st, json.loads(data)["down"]), (503, ["rack-a"]))
+        finally:
+            srv.state["error"] = None
+        self.assertEqual(self.req("GET", "/healthz")[0], 200)
 
     def test_metrics(self):
         self.assertEqual(self.req("GET", "/metrics")[0], 401)

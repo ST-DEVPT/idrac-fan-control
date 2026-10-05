@@ -304,8 +304,7 @@ function renderControls() {
   if (document.activeElement !== $("#smart-target")) $("#smart-target").value = Math.round(tv(draft.smart_target));
   $("#smart-out").innerHTML = `${fmt(tv(draft.smart_target))}<small> ${tu()}</small>`;
   $$(".tu").forEach(el => el.textContent = tu());
-  $("#smart-live").textContent = server?.settings.mode === "smart" && server.effective === "manual"
-    ? `Now ${server.applied_speed} % · ${server.reason.replace(/^smart: /, "")}` : "";
+  renderSmart();
   $("#fixed-out").innerHTML = `${draft.fixed_speed}<small> %</small>`;
   if (document.activeElement !== $("#failsafe")) $("#failsafe").value = Math.round(tv(draft.failsafe_temp));
   if (document.activeElement !== $("#ramp")) $("#ramp").value = draft.ramp_down_seconds;
@@ -325,6 +324,40 @@ function renderControls() {
   if (drag == null) renderCurve();
 }
 function touch() { dirty = true; renderControls(); }
+
+// smart mode: what it is doing now, and the map it has learned of this server
+function renderSmart() {
+  const sm = server?.smart, active = sm && server.effective === "manual";
+  $("#smart-live").textContent = active ? `Now ${server.applied_speed} % · ${server.reason.replace(/^smart: /, "")}` : "";
+  const trend = sm ? `Trend ${sm.trend >= 0 ? "+" : ""}${fmt(td(sm.trend), 1)} ${tu()}/min · ` : "";
+  $("#smart-detail").textContent = !active ? "" : sm.learned != null ? `${trend}learned ${sm.learned} % for this load`
+    : `${trend}still learning what this load needs`;
+  const pts = server?.smart_map || [];
+  $("#smart-map").hidden = pts.length < 2;
+  if (pts.length < 2) return;
+  const W = 400, H = 150, pad = { l: 34, r: 12, t: 10, b: 24 };
+  const watts = server.sensors?.watts;
+  let lo = Math.min(...pts.map(p => p[0]), watts ?? Infinity), hi = Math.max(...pts.map(p => p[0]), watts ?? -Infinity);
+  const span = Math.max(20, hi - lo);
+  lo -= span * .08; hi += span * .08;
+  const x = w => pad.l + (w - lo) / (hi - lo) * (W - pad.l - pad.r), y = v => pad.t + (1 - v / 100) * (H - pad.t - pad.b);
+  let g = "";
+  for (const v of [0, 50, 100]) g += `<line class="g" x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${pad.l - 6}" y="${y(v) + 3.5}" text-anchor="end">${v}</text>`;
+  const step = Math.max(10, Math.ceil((hi - lo) / 4 / 10) * 10);
+  for (let w = Math.ceil(lo / step) * step; w <= hi; w += step) g += `<text x="${x(w)}" y="${H - 7}" text-anchor="middle">${w} W</text>`;
+  const line = pts.map(p => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ");
+  g += `<polyline class="line" points="${line}"/>` + pts.map(p => `<circle class="dot-pt" cx="${x(p[0]).toFixed(1)}" cy="${y(p[1]).toFixed(1)}" r="2.5"/>`).join("");
+  if (active && watts != null) g += `<circle class="now" cx="${x(watts).toFixed(1)}" cy="${y(server.applied_speed).toFixed(1)}" r="4"/>`;
+  $("#smart-svg").innerHTML = g;
+}
+$("#smart-forget").onclick = async () => {
+  if (!confirm(translate("Forget what smart mode learned about this server? It learns again as it runs."))) return;
+  const r = await api("/api/smart/forget?server=" + encodeURIComponent(server.id), {});
+  if (!r.ok) return toast((await r.json().catch(() => ({}))).error || "Could not forget", true);
+  server.smart_map = [];
+  renderSmart();
+  toast("Smart mode starts learning afresh");
+};
 
 $$(".seg button").forEach(b => b.onclick = () => { draft.mode = b.dataset.mode; touch(); });
 $("#fixed").oninput = e => { draft.fixed_speed = +e.target.value; touch(); };
@@ -804,6 +837,7 @@ addEventListener("resize", () => { if (route.view === "server" && server) render
 addEventListener("beforeunload", e => { if (dirty || (typeof aDirty !== "undefined" && aDirty)) e.preventDefault(); });
 
 route = parseRoute();
-pollOverview().then(go);
+// after every script has run: the first route may be a page that integrations.js draws
+addEventListener("DOMContentLoaded", () => pollOverview().then(go));
 setInterval(pollOverview, 5000);
 setInterval(pollServer, 5000);

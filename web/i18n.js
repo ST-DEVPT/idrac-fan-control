@@ -44,12 +44,16 @@ const PT = {
   "15 min": "15 min", "Collecting readings…": "A recolher leituras…", "Exhaust": "Saída", "Fan speed": "Rotação",
   // control
   "Control": "Controlo", "Fixed": "Fixa", "Curve": "Curva", "Smart": "Smart",
+  "Learned: the speed each power draw needs": "Aprendido: a velocidade que cada consumo pede", "Forget": "Esquecer",
+  "Forget what smart mode learned about this server? It learns again as it runs.": "Esquecer o que o modo smart aprendeu sobre este servidor? Volta a aprender enquanto corre.",
+  "Smart mode starts learning afresh": "O modo smart recomeça a aprender", "Could not forget": "Não foi possível esquecer",
+  "Holds the CPU at the target with as little fan as it can, and keeps every other sensor clear of its limits. It learns the speed each load needs, sees heat coming before it arrives, and rides out short bursts instead of hunting.":
+    "Mantém o CPU no alvo com o mínimo de ventoinha possível e mantém os outros sensores longe dos limites. Aprende a velocidade que cada carga pede, vê o calor a chegar antes de ele chegar e aguenta picos curtos sem andar para cima e para baixo.",
+  "Fans speed up at once, slow down only after lower demand lasts this long": "As ventoinhas aceleram logo e só abrandam depois de a procura baixar durante este tempo",
   "The BMC sets fan speed with its factory profile. Louder, but no surprises. This is also where the controller falls back whenever something goes wrong.":
     "O BMC define a velocidade com o perfil de fábrica. Mais ruído, mas sem surpresas. É também para aqui que o controlador recua sempre que algo corre mal.",
   "Every fan at the same speed, as long as the CPU stays below the failsafe temperature.":
     "Todas as ventoinhas à mesma velocidade, enquanto o CPU estiver abaixo da temperatura de segurança.",
-  "Finds the slowest speed that holds the CPU at the target, and keeps every other sensor clear of its limits. Rises quickly when it has to, falls slowly so you don't hear it hunting.":
-    "Encontra a velocidade mais baixa que mantém o CPU no alvo e todos os outros sensores longe dos seus limites. Sobe depressa quando é preciso e desce devagar, para não se ouvir a oscilar.",
   "Drag the points. Double-click empty space to add a point, or a point to remove it.":
     "Arraste os pontos. Duplo clique num espaço vazio acrescenta um ponto; num ponto, remove-o.",
   "Start from": "Começar por", "Quiet": "Silenciosa", "Balanced": "Equilibrada", "Cool": "Fresca", "Storage": "Armazenamento",
@@ -62,7 +66,7 @@ const PT = {
   "°C of the warning level its BMC defines": "°C do limite de aviso definido pelo BMC",
   "of the warning level its BMC defines": "do limite de aviso definido pelo BMC",
   "Minimum speed": "Velocidade mínima", "Fans never go below this in fixed, curve and smart modes": "As ventoinhas nunca descem abaixo disto nos modos fixo, curva e smart",
-  "Ramp-down delay": "Atraso a abrandar", "Fans speed up at once, slow down after this long": "As ventoinhas aceleram logo e só abrandam passado este tempo",
+  "Ramp-down delay": "Atraso a abrandar",
   "Quiet hours": "Horário silencioso", "Caps the fan speed overnight. The failsafe still applies at any hour": "Limita a velocidade durante a noite. O limite de segurança continua ativo a qualquer hora",
   "max": "máx.", "Dry run": "Simulação", "Decide and log what would be sent, but leave the fans to the BMC": "Decide e regista o que enviaria, mas deixa as ventoinhas com o BMC",
   "Third-party PCIe cards": "Placas PCIe de terceiros", "Dell's default cooling response": "Resposta de arrefecimento da Dell",
@@ -73,6 +77,22 @@ const PT = {
   "Temperatures": "Temperaturas", "Events": "Eventos", "Sensor": "Sensor", "No readings": "Sem leituras", "Nothing yet": "Ainda nada",
   // add / edit
   "Hardware": "Hardware", "Connection": "Ligação", "Name": "Nome", "Address": "Endereço", "User": "Utilizador", "Password": "Palavra-passe",
+  "Status and mode": "Estado e modo", "CPU temperature": "Temperatura do CPU",
+  "Last hour chart": "Gráfico da última hora",
+  "Server model": "Modelo do servidor", "Nothing is shared yet.": "Ainda não partilha nada.", "Widgets updated": "Widgets atualizados",
+  "Could not build the widget": "Não foi possível gerar o widget", "Could not save": "Não foi possível guardar",
+  "Turn on widgets": "Ativar widgets", "Choose what widgets may show": "Escolha o que os widgets podem mostrar",
+  "The token reads these and nothing else: never the BMC address, settings, events or error messages.":
+    "O token lê isto e nada mais: nunca o endereço do BMC, definições, eventos ou mensagens de erro.",
+  "Homarr 2.0: native widget": "Homarr 2.0: widget nativo", "Any dashboard: iFrame widget": "Qualquer dashboard: widget iFrame",
+  "App tile status": "Estado para o tile da app", "Download widget": "Descarregar widget", "All servers": "Todos os servidores",
+  "Homarr reaches this address over": "O Homarr chega a este endereço pela", "Your network": "Sua rede", "The internet": "Internet",
+  "The same machine": "Mesma máquina", "Address Homarr uses": "Endereço que o Homarr usa",
+  "A Custom Widget that Homarr fetches itself, with its own options for the server, unit, chart and air temperatures.":
+    "Um Custom Widget que o próprio Homarr vai buscar, com opções para o servidor, unidade, gráfico e temperaturas do ar.",
+  "A native widget for Homarr 2.0, an iFrame widget for any dashboard, and a status check for app tiles. You choose what they may show.":
+    "Um widget nativo para o Homarr 2.0, um widget iFrame para qualquer dashboard e um estado para tiles de apps. Escolhe o que podem mostrar.",
+  "Unknown server": "Servidor desconhecido",
   "Not sure? Let the BMC tell you.": "Não tem a certeza? Pergunte ao BMC.", "Detect": "Detetar",
   "Find BMCs on your network.": "Procure BMCs na sua rede.", "Scan network": "Procurar na rede", "Network range to scan": "Gama de rede a procurar",
   "Answers": "Responde a", "Suggested": "Sugestão", "Use": "Usar", "Added": "Adicionado", "Unknown": "Desconhecido",
@@ -182,12 +202,18 @@ const PT_PATTERNS = [
   [/^Fixed · (.+)$/, "Fixa · $1"], [/^Curve · (.+)$/, "Curva · $1"], [/^Smart · (.+)$/, "Smart · $1"],
   [/^Unreachable: (.+)$/, "Inacessível: $1"], [/^Edit (.+)$/, "Editar $1"],
   [/^Now (.+) · (.+)$/, "Agora $1 · $2"],
+  [/^Trend (.+) · (.+)$/, "Tendência $1 · $2"], [/^learned (\d+) % for this load$/, "aprendido $1 % para esta carga"],
+  [/^still learning what this load needs$/, "ainda a aprender o que esta carga pede"],
   [/^Scanning (.+)… a \/24 takes about 15 seconds\.$/, "A procurar em $1… uma /24 demora cerca de 15 segundos."],
   [/^No BMC answered in (.+)\. Check the range, and that the container can reach that network\.$/, "Nenhum BMC respondeu em $1. Confirme a gama e se o contentor chega a essa rede."],
   // reasons and events written by the server
   [/^[Cc]urve at (.+)$/, "curva a $1"], [/^[Ff]ixed speed$/, "velocidade fixa"], [/^[Aa]utomatic mode selected$/, "modo automático escolhido"],
   [/^[Mm]onitoring only$/, "só monitorização"], [/^[Nn]o CPU temperature reading$/, "sem leitura de temperatura do CPU"],
   [/^[Ss]erver is powered off$/, "servidor desligado"], [/^CPU (.+), target (.+)$/, "CPU $1, alvo $2"],
+  [/^smart: (.+)$/, "smart: $1"], [/^(.+), rising to (.+)$/, "$1, a subir para $2"],
+  [/^([^(:]+?) (-?\d+°C), target (.+)$/, "$1 $2, alvo $3"], [/^boost, (.+) heading for (.+)$/, "reforço, $1 a caminho de $2"],
+  [/^[Ss]mart mode has no temperature to aim at$/, "o modo smart não tem temperatura a seguir"],
+  [/^Smart mode starts learning afresh(.*)$/, "O modo smart recomeça a aprender$1"],
   [/^(.*), holding (\d+)% for ramp-down$/, "$1, a manter $2% enquanto abranda"], [/^(.*), quiet hours cap (\d+)%$/, "$1, horário silencioso, máx. $2%"],
   [/^Fans → automatic \((.+)\)$/, "Ventoinhas → automático ($1)"], [/^Fans → (\d+)% \((.+)\)$/, "Ventoinhas → $1% ($2)"],
   [/^Dry run: would set fans to (.+)$/, "Simulação: poria as ventoinhas a $1"],
@@ -208,7 +234,7 @@ function localize(text) {
 
 function translate(text) {
   if (PREFS.lang !== "pt") return text;
-  const key = text.trim();
+  const key = text.trim().replace(/\s+/g, " ");  // text wrapped over several lines in the HTML
   if (!key || !/[A-Za-z]/.test(key)) return text;
   let out = PT[key];
   if (out === undefined) {
@@ -222,7 +248,7 @@ function translate(text) {
     }
   }
   if (out === undefined) return text;
-  return text.replace(key, out);
+  return text.replace(text.trim(), () => out);
 }
 
 const SKIP = new Set(["SCRIPT", "STYLE", "PRE", "CODE", "TEXTAREA", "INPUT"]);
