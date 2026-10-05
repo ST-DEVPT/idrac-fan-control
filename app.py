@@ -8,11 +8,12 @@ import os
 import signal
 import sys
 import threading
+import time
 from http.server import ThreadingHTTPServer
 
 from fanctl import config, web
 from fanctl.alerts import DISCORD_WEBHOOK, WEBHOOK_RE, reporter
-from fanctl.server import SERVERS, load_registry
+from fanctl.server import SERVERS, load_registry, stalled
 
 
 def data_dir_writable():
@@ -34,6 +35,21 @@ def shutdown(*_):
     os._exit(0)
 
 
+def watchdog():
+    """A control loop that stops turning leaves the fans wherever it last set them, with nobody
+    watching the temperature. Hand every fan back to its BMC and exit: Docker's restart policy
+    starts a fresh process."""
+    while True:
+        time.sleep(30)
+        stuck = stalled(SERVERS.values())
+        if stuck:
+            print(f"ERROR: control loop stalled for {', '.join(stuck)}; handing fans back and restarting", flush=True)
+            for s in list(SERVERS.values()):  # in threads: a stuck loop may hold the command lock
+                threading.Thread(target=s.release, daemon=True).start()
+            time.sleep(10)
+            os._exit(1)
+
+
 def main():
     if not data_dir_writable():
         sys.exit(f"ERROR: cannot write to {config.DATA_DIR.resolve()}. The container runs as uid 1000; "
@@ -49,6 +65,7 @@ def main():
     for srv in list(SERVERS.values()):
         srv.start()
     threading.Thread(target=reporter, args=(SERVERS,), daemon=True, name="reporter").start()
+    threading.Thread(target=watchdog, daemon=True, name="watchdog").start()
     print(f"Fan Control {config.VERSION} listening on :{config.PORT} for {len(SERVERS)} server(s)", flush=True)
     ThreadingHTTPServer(("0.0.0.0", config.PORT), web.Handler).serve_forever()
 

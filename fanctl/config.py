@@ -24,6 +24,9 @@ LONG_BUCKET = 300             # long history: one averaged point per 5 minutes..
 LONG_SECONDS = 7 * 86400      # ...kept for 7 days
 SAVE_EVERY = 300           # seconds between history snapshots to disk
 FAILSAFE_HYSTERESIS = 3    # °C the CPU must drop below the failsafe before manual control resumes
+# A control loop that has not turned for this long is stuck (every BMC call has a timeout, the
+# slowest 60 s): the watchdog hands the fans back and restarts the process.
+STALL_SECONDS = max(180, INTERVAL * 10)
 
 
 def write_json(path, data):

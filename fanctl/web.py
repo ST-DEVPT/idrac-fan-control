@@ -16,7 +16,7 @@ from .alerts import (ALERT_KINDS, SAMPLE, alert_config, build_payload, build_rep
 from .config import DATA_DIR, EMBED_TOKEN, INTERVAL, METRICS_TOKEN, VERSION, WEB, write_json
 from .control import validate_settings
 from .drivers import DRIVERS, DriverError, detect, scan
-from .server import SERVERS, registry_lock, save_dashboard_servers, start, stop, unique_id, validate_server
+from .server import SERVERS, registry_lock, save_dashboard_servers, stalled, start, stop, unique_id, validate_server
 
 KEY = b""  # set by app.main() once the data folder is known to be writable
 
@@ -414,6 +414,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.parse()
         path = self.route
+        if path == "/livez":
+            # the process and every control loop turn, whatever the BMCs answer: Docker's health check
+            stuck = stalled(SERVERS.values())
+            return self.send(503 if stuck else 200, {"ok": not stuck, "stalled": stuck})
         if path == "/healthz":
             # 200 only while every BMC answers: an app tile goes red when one stops responding
             down = [s.id for s in list(SERVERS.values()) if s.state["error"]

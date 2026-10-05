@@ -16,6 +16,7 @@ ENV APP_VERSION=$VERSION DATA_DIR=/data PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECO
 USER app
 VOLUME /data
 EXPOSE 8080
-HEALTHCHECK --interval=60s --timeout=5s CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
+# liveness, not BMC health: a BMC that stops answering must not get the container restarted
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD wget -qO- "http://127.0.0.1:${PORT:-8080}/livez" || exit 1
 # exec form: python is PID 1 and receives SIGTERM, so fans go back to automatic on `docker stop`
 CMD ["python", "app.py"]

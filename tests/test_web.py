@@ -190,6 +190,22 @@ class HTTP(Base):
             self.assertEqual(self.get("/api/homarr-widget?" + bad)[0], 400)
         self.assertEqual(self.req("GET", "/api/homarr-widget?base=https://x&token=e-token")[0], 401)
 
+    def test_liveness_ignores_bmcs_but_not_a_stuck_loop(self):
+        srv = SERVERS["rack-a"]
+        srv.state["error"] = "timed out"
+        try:
+            self.assertEqual(self.req("GET", "/livez")[0], 200)   # a silent BMC is not a dead process
+        finally:
+            srv.state["error"] = None
+        real_thread, real_tick = srv.thread, srv.tick
+        srv.thread = type("T", (), {"is_alive": lambda self: True})()
+        srv.tick = 0
+        try:
+            st, _, data = self.req("GET", "/livez")
+            self.assertEqual((st, json.loads(data)["stalled"]), (503, ["rack-a"]))
+        finally:
+            srv.thread, srv.tick = real_thread, real_tick
+
     def test_health_reports_a_silent_bmc(self):
         srv = SERVERS["rack-a"]
         srv.state["error"] = "Redfish /redfish/v1: timed out"

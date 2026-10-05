@@ -10,7 +10,7 @@ import time
 from collections import deque
 
 from .alerts import alert_config, notify
-from .config import DATA_DIR, HISTORY_SECONDS, INTERVAL, LONG_BUCKET, LONG_SECONDS, SAVE_EVERY, write_json
+from .config import DATA_DIR, HISTORY_SECONDS, INTERVAL, LONG_BUCKET, LONG_SECONDS, SAVE_EVERY, STALL_SECONDS, write_json
 from .control import (DEFAULT_SETTINGS, aggregate, curve_speed, decide, learned_curve, quiet_cap, ramped, smart_step,
                       speed_text, validate_learned)
 from .drivers import DRIVERS, HOST_RE, DemoDriver, DriverError, RedfishDriver
@@ -44,6 +44,7 @@ class Server:
         self.pcie_applied = None
         self.dry_released = False
         self.thread = None
+        self.tick = time.time()  # last turn of the control loop, for the watchdog
         self.cmd_lock = threading.Lock()  # fan commands vs. release(): never both at once
         self.state = {"sensors": None, "cpu_temp": None, "effective": None, "applied_speed": None,
                       "target_speed": None, "reason": "", "failsafe": False, "error": None,
@@ -292,6 +293,7 @@ class Server:
             self.demo_backfill()
         notify(self, "started")
         while not self.stop.is_set():
+            self.tick = time.time()
             try:
                 self.cycle()
             except Exception as e:  # never let a bug kill the loop and leave fans pinned low
@@ -328,6 +330,13 @@ class Server:
                 "fan_rpm": round(sum(f["rpm"] for f in fans if f["rpm"] is not None) / max(1, sum(f["rpm"] is not None for f in fans)))
                 if any(f["rpm"] is not None for f in fans) else None,
                 "spark": [[p["t"], p["cpu"], p["speed"]] for p in hour[::step]]}
+
+
+def stalled(servers):
+    """Servers whose control loop died or stopped turning: their fans sit at the last speed set."""
+    now = time.time()
+    return [s.id for s in list(servers) if s.thread and not s.stop.is_set()
+            and (not s.thread.is_alive() or now - s.tick > STALL_SECONDS)]
 
 
 # ---------------------------------------------------------------- server registry

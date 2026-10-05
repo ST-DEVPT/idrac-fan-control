@@ -198,6 +198,18 @@ The BMC takes over, whatever the mode, when:
 Manual control resumes once things are 3 °C below the limit that tripped, so the fans don't flap at the
 edge. Fans never run below the **minimum speed** in manual modes.
 
+**If the controller itself stops.** A control loop that stops turning for 3 minutes trips a watchdog:
+every fan goes back to its BMC and the process exits, so Docker's restart policy (`restart:
+unless-stopped`) starts a fresh one. The image's health check reads `/livez`, which follows the control
+loops and not the BMCs. What no process can cover is its own sudden death (`kill -9`, out of memory,
+Docker gone): a Dell iDRAC then keeps the last manual speed. For that, run
+[`scripts/fan-guard.sh`](scripts/fan-guard.sh) from the host's cron every minute. When the container is
+not running healthy for two minutes in a row, it hands the fans back to the iDRAC with `ipmitool`:
+
+```bash
+* * * * * /root/docker/fan-guard.sh >> /var/log/fan-guard.log 2>&1
+```
+
 **Dry run** decides and logs what it would send ("Dry run: would set fans to 25%"), but leaves the fans
 to the BMC. Use it to try a new server type or a new curve.
 
