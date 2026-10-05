@@ -162,6 +162,7 @@ const PT = {
   "Discard unsaved changes?": "Descartar as alterações por guardar?",
   "Fan Control did not answer. Nothing was saved.": "O Fan Control não respondeu. Nada foi guardado.",
   "Or pick the type yourself:": "Ou escolha o tipo à mão:",
+  "Alert rules": "Regras de alerta",
   "Not sure? Let the BMC tell you.": "Não tem a certeza? Pergunte ao BMC.", "Detect": "Detetar",
   "Find BMCs on your network.": "Procure BMCs na sua rede.", "Scan network": "Procurar na rede", "Network range to scan": "Gama de rede a procurar",
   "Answers": "Responde a", "Suggested": "Sugestão", "Use": "Usar", "Added": "Adicionado", "Unknown": "Desconhecido",
@@ -251,6 +252,7 @@ const PT = {
 // Whole elements whose sentence is split by inline markup (<b>, <code>, <a>), keyed by their
 // data-i18n attribute: translating such a sentence piece by piece cannot work in another language.
 const PT_HTML = {
+  "pm-rules": "Opcional: <a href=\"/static/prometheus-alerts.yml\" download=\"fan-control-alerts.yml\">descarregue as regras de alerta</a> e junte-as em <code>rule_files</code>. Também apanham o próprio Fan Control em baixo, um ciclo parado e uma ventoinha avariada.",
   "add-lede": "Escolha o hardware que tem, ou <a href=\"#/add\">procure na sua rede</a> BMCs. Dell iDRAC e Supermicro têm controlo total das ventoinhas; HPE iLO e outros servidores Redfish ou IPMI são monitorizados, com histórico, alertas e Grafana.",
   "thr-help": "O BMC retoma as ventoinhas quando algum sensor (placas PCIe, discos, DIMMs…) fica a <span id=\"margin-text\">5</span> <span class=\"tu\">°C</span> do nível de aviso definido pelo seu BMC",
   "pm-where": "No <code>prometheus.yml</code>. Mude o endereço se o Prometheus chegar a este painel por outro caminho.",

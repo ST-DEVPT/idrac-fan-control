@@ -1,0 +1,20 @@
+# Fan Control has no dependencies and no build step; this file only configures the linter.
+[tool.ruff]
+line-length = 125
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "S"]
+ignore = [
+  "E501",   # long lines are wrapped by hand where it reads better
+  "E731",   # small lambdas assigned to names are deliberate
+  "S603",   # subprocess with a fixed argument list and no shell is the safe way, and the only one used
+  "S607",   # ipmitool, ssh and sshpass are found on PATH inside the container by design
+  "S311",   # random only simulates the demo server
+  "S310",   # urllib only opens URLs the code builds from validated hosts
+  "UP038",  # isinstance with tuples reads fine
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B", "E741"]
+"e2e/*" = ["S"]

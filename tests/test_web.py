@@ -233,6 +233,19 @@ class HTTP(Base):
                 self.assertIn(r.status, (400, 413))
                 c.close()
 
+    def test_backup_carries_the_smart_map(self):
+        srv = SERVERS["rack-a"]
+        srv.learned.update({"30": 41.0})
+        try:
+            data = json.loads(self.get("/api/export")[2])
+            self.assertEqual(data["smart"]["rack-a"], {"30": 41.0})
+            srv.learned.clear()
+            st, _, rep = self.post("/api/import", {"data": data})
+            self.assertEqual(st, 200)
+            self.assertEqual(srv.learned, {"30": 41.0})
+        finally:
+            srv.learned.clear()
+
     def test_backup_without_secrets_has_no_channel_secrets(self):
         from fanctl import alerts
         saved = alerts.alert_config()
@@ -344,6 +357,10 @@ class HTTP(Base):
         self.assertRegex(text, r'_up\{server="rack-a",name="Rack A",driver="demo"\} 1')
         self.assertRegex(text, r'_fan_rpm\{server="rack-a",name="Rack A",driver="demo",fan="Fan1"\}')
         self.assertNotIn("e+", text)
+        self.assertIn("# TYPE fanctl_bmc_errors_total counter", text)
+        self.assertRegex(text, r'fanctl_loop_last_tick_timestamp_seconds\{server="rack-a"')
+        self.assertIn("fanctl_alerts_sent_total", text)
+        self.assertEqual(self.req("GET", "/static/prometheus-alerts.yml")[0], 200)
 
     def test_integrations(self):
         st, _, data = self.get("/api/integrations")

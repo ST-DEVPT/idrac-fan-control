@@ -234,6 +234,7 @@ class QuietHours(unittest.TestCase):
         self.assertEqual([quiet_cap(q, self.at(t)) for t in ("22:59", "23:00", "03:00", "06:59", "07:00")],
                          [None, 25, 25, 25, None])
         self.assertIsNone(quiet_cap({**q, "enabled": False}, self.at("03:00")))
+        self.assertEqual(quiet_cap({**q, "start": "00:00", "end": "00:00"}, self.at("15:00")), 25)  # the whole day
 
     def test_window_within_a_day(self):
         from fanctl.control import quiet_cap

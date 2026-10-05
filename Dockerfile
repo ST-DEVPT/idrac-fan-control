@@ -1,4 +1,5 @@
-FROM python:3.13-alpine
+# pinned by digest for reproducible builds; Dependabot proposes the updates
+FROM python:3.13-alpine@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a
 
 # ipmitool: Dell, Supermicro and generic IPMI. openssh-client + sshpass: HPE iLO 4 with unlocked firmware.
 # tzdata: quiet hours follow the TZ variable.

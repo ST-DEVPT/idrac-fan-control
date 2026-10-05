@@ -1,0 +1,56 @@
+# Prometheus alert rules for Fan Control. Add to prometheus.yml:
+#   rule_files: ["fan-control-alerts.yml"]
+# and route them with Alertmanager. Fan Control's own alerts (Discord, ntfy...) cover the same
+# ground from inside; these also catch Fan Control itself being down.
+groups:
+  - name: fan-control
+    rules:
+      - alert: FanControlDown
+        expr: up{job="fan-control"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Fan Control is not answering
+          description: Nothing watches the fans of these servers. If it is not back soon, check the container.
+
+      - alert: FanControlLoopStalled
+        expr: time() - fanctl_loop_last_tick_timestamp_seconds > 300
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.name }}: control loop stalled"
+          description: The loop has not turned for 5 minutes. The watchdog should have restarted it.
+
+      - alert: BMCUnreachable
+        expr: fanctl_up == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.name }}: BMC unreachable"
+          description: The BMC has not answered for 5 minutes; it controls its fans on its own meanwhile.
+
+      - alert: FailsafeLasting
+        expr: fanctl_failsafe_active == 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.name }}: failsafe for 10 minutes"
+          description: Something keeps the server hot, or a sensor or fan is faulty. The BMC holds the fans.
+
+      - alert: FanFailed
+        expr: fanctl_fan_failed == 1
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.name }}: fan {{ $labels.fan }} failed"
+
+      - alert: CPUHot
+        expr: fanctl_cpu_temperature_celsius > 80
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.name }}: CPU at {{ $value | humanize }} °C"
+
+      - alert: FanCommandsRefused
+        expr: increase(fanctl_fan_commands_refused_total[15m]) > 3
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.name }}: the BMC keeps refusing fan commands"

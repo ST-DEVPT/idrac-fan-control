@@ -1,3 +1,4 @@
+# Keeps the pinned actions and the pinned base image current, through pull requests that CI tests.
 version: 2
 updates:
   - package-ecosystem: github-actions

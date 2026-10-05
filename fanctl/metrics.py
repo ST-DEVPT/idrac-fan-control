@@ -1,5 +1,6 @@
 """Prometheus metrics: every reading of every server, in the text exposition format."""
 
+from .alerts import SENT
 from .config import VERSION
 
 
@@ -9,14 +10,16 @@ def metrics(servers):
 
     out = {}
 
-    def add(name, help_, labels, value):
+    def add(name, help_, labels, value, kind="gauge"):
         if value is None:
             return
-        rows = out.setdefault(name, [f"# HELP {name} {help_}", f"# TYPE {name} gauge"])
+        rows = out.setdefault(name, [f"# HELP {name} {help_}", f"# TYPE {name} {kind}"])
         lab = ",".join('%s="%s"' % (k, esc(v)) for k, v in labels.items())
         rows.append(f"{name}{{{lab}}} {value:.15g}")
 
     add("fanctl_info", "Build information.", {"version": VERSION}, 1)
+    add("fanctl_alerts_sent_total", "Alerts handed to Discord, ntfy, Gotify or a webhook.", {}, SENT["sent"], "counter")
+    add("fanctl_alerts_failed_total", "Alerts a channel did not accept.", {}, SENT["failed"], "counter")
     for s in list(servers.values()):
         with s.lock:
             st = dict(s.state)
@@ -35,6 +38,14 @@ def metrics(servers):
         add("fanctl_inlet_temperature_celsius", "Inlet air temperature.", lbl, sens.get("inlet"))
         add("fanctl_exhaust_temperature_celsius", "Exhaust air temperature.", lbl, sens.get("exhaust"))
         add("fanctl_power_watts", "System power draw.", lbl, sens.get("watts"))
+        add("fanctl_loop_last_tick_timestamp_seconds", "Unix time the control loop last turned; stalls show here.",
+            lbl, s.tick)
+        for key, help_ in (("bmc_errors", "Failed BMC readings."), ("fan_commands", "Fan commands the BMC accepted."),
+                           ("fan_commands_refused", "Fan commands the BMC refused."),
+                           ("failsafe_trips", "Times the failsafe handed the fans to the BMC.")):
+            add(f"fanctl_{key}_total", help_, lbl, s.counters[key], "counter")
+        for fan in sorted(s.fans_failed):
+            add("fanctl_fan_failed", "1 for a fan that stopped while the others spin.", {**lbl, "fan": fan}, 1)
         sm = st.get("smart")
         if sm and "sensor" in sm:  # smart mode in control: what it sees and why it chose that speed
             add("fanctl_smart_target_celsius", "Temperature smart mode aims at, for the sensor it follows.",

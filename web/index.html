@@ -327,6 +327,12 @@
         <p data-i18n="pm-check">Prometheus → Status → Targets should show <b>fan-control</b> as <b>UP</b>. Then try
           <code>fanctl_cpu_temperature_celsius</code> in the query box.</p>
       </section>
+      <section class="int-step">
+        <h2><span class="n">4</span> Alert rules</h2>
+        <p data-i18n="pm-rules">Optional: <a href="/static/prometheus-alerts.yml" download="fan-control-alerts.yml">download the alert
+          rules</a> and add them under <code>rule_files</code>. They also catch Fan Control itself being down, a stalled loop
+          and a failed fan.</p>
+      </section>
     </div>
     <aside class="int-side">
       <h2>Metrics</h2>

@@ -1,4 +1,6 @@
-"""Backup and restore: servers added in the dashboard, every fan setting, alerts and widgets."""
+"""Backup and restore: servers added in the dashboard, every fan setting, alerts, widgets and what
+smart mode learned. Not included: history (it is not configuration), tokens and sessions (tokens are
+shown once by design; make new ones on the new machine)."""
 
 import time
 
@@ -27,7 +29,9 @@ def export_config(secrets_too=False):
     return {"format": "fan-control-backup", "version": 1, "app": VERSION, "exported": int(time.time()),
             "with_secrets": secrets_too, "servers": servers,
             "settings": {s.id: s.settings() for s in list(SERVERS.values())}, "alerts": alerts_cfg,
-            "widget": {"fields": widget_fields()}}
+            "widget": {"fields": widget_fields()},
+            # what smart mode learned: days of steady running that should survive a move to another machine
+            "smart": {s.id: dict(s.learned) for s in list(SERVERS.values()) if s.learned}}
 
 
 def import_config(data, who="import"):
@@ -68,6 +72,13 @@ def import_config(data, who="import"):
             report["updated"].append("Discord")
         except (ValueError, TypeError, AttributeError) as e:
             report["skipped"].append(f"Discord: {e}")
+    for sid, learned in (data.get("smart") or {}).items():
+        srv = SERVERS.get(sid)
+        if srv and isinstance(learned, dict):
+            from .control import validate_learned
+            with srv.lock:
+                srv.learned.update(validate_learned(learned))
+            report["updated"].append(f"{srv.name} smart map")
     if isinstance(data.get("widget"), dict):
         try:
             save_widget_fields(data["widget"].get("fields"))

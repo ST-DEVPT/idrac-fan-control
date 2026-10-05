@@ -97,14 +97,19 @@ def failed_fans(fans):
             or (f["pct"] is not None and f["pct"] == 0 and pcts and max(pcts) >= 10)]
 
 
+TIME_RE = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
+
+
+def in_window(start, end, now):
+    """Whether `now` (a time.struct_time) falls between two HH:MM times. A window may run past
+    midnight; start == end means the whole day, for quiet hours and schedule profiles alike."""
+    minute, a, b = now.tm_hour * 60 + now.tm_min, _minutes(start), _minutes(end)
+    return a == b or (a <= minute < b if a < b else minute >= a or minute < b)
+
+
 def quiet_cap(quiet, now):
     """The speed cap in force at `now` (a time.struct_time), or None outside quiet hours."""
-    if not quiet.get("enabled"):
-        return None
-    minute = now.tm_hour * 60 + now.tm_min
-    start, end = (int(x[:2]) * 60 + int(x[3:]) for x in (quiet["start"], quiet["end"]))
-    inside = start <= minute < end if start <= end else minute >= start or minute < end  # may span midnight
-    return quiet["max_speed"] if inside else None
+    return quiet["max_speed"] if quiet.get("enabled") and in_window(quiet["start"], quiet["end"], now) else None
 
 
 def _minutes(hhmm):
@@ -118,11 +123,9 @@ def active_profiles(schedule, now):
     out = []
     for p in schedule:
         start, end = _minutes(p["start"]), _minutes(p["end"])
-        if start == end:
-            on = day in p["days"]
-        elif start < end:
-            on = day in p["days"] and start <= minute < end
-        else:
+        if start < end or start == end:
+            on = day in p["days"] and in_window(p["start"], p["end"], now)
+        else:  # past midnight: the morning part belongs to the day before
             on = (day in p["days"] and minute >= start) or ((day - 1) % 7 in p["days"] and minute < end)
         if on:
             out.append(p)
@@ -193,7 +196,7 @@ def validate_settings(new, current):
     q = s["quiet"]
     if not (isinstance(q, dict) and set(q) == {"enabled", "start", "end", "max_speed"}
             and type(q["enabled"]) is bool and type(q["max_speed"]) is int and 0 <= q["max_speed"] <= 100
-            and all(isinstance(q[k], str) and re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", q[k]) for k in ("start", "end"))):
+            and all(isinstance(q[k], str) and TIME_RE.fullmatch(q[k]) for k in ("start", "end"))):
         raise ValueError("quiet hours need enabled, start and end as HH:MM, and a max_speed from 0 to 100")
     sched = s["schedule"]
     if not (isinstance(sched, list) and len(sched) <= 8):
@@ -206,7 +209,7 @@ def validate_settings(new, current):
         if not (isinstance(p["days"], list) and p["days"] and all(type(d) is int and 0 <= d <= 6 for d in p["days"])
                 and len(set(p["days"])) == len(p["days"])):
             raise ValueError(f"{p['name']}: pick at least one day")
-        if not all(isinstance(p[k], str) and re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", p[k]) for k in ("start", "end")):
+        if not all(isinstance(p[k], str) and TIME_RE.fullmatch(p[k]) for k in ("start", "end")):
             raise ValueError(f"{p['name']}: start and end must be HH:MM")
         if p["max_speed"] is not None and not (type(p["max_speed"]) is int and 0 <= p["max_speed"] <= 100):
             raise ValueError(f"{p['name']}: the maximum speed must be a whole number from 0 to 100")

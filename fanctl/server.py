@@ -66,6 +66,8 @@ class Server:
         self.dry_released = False
         self.thread = None
         self.tick = time.time()  # last turn of the control loop, for the watchdog
+        # since the process started, for Prometheus counters
+        self.counters = {"bmc_errors": 0, "fan_commands": 0, "fan_commands_refused": 0, "failsafe_trips": 0}
         self.cmd_lock = threading.Lock()  # fan commands vs. release(): never both at once
         self.state = {"sensors": None, "cpu_temp": None, "effective": None, "applied_speed": None,
                       "target_speed": None, "reason": "", "failsafe": False, "error": None,
@@ -239,6 +241,7 @@ class Server:
         try:
             sensors = self.driver.read()
         except DriverError as e:
+            self.counters["bmc_errors"] += 1
             with self.lock:
                 if self.state["error"] != str(e):
                     self.log(f"Cannot read the BMC: {e}", "error")
@@ -356,7 +359,9 @@ class Server:
                         self.driver.set_auto()
                     else:
                         self.driver.set_speed(speed)  # re-sent every cycle: a BMC reset silently returns to auto
+                    self.counters["fan_commands"] += 1
                 except DriverError as e:
+                    self.counters["fan_commands_refused"] += 1
                     error = f"fan command refused: {e}"
                     effective, speed, reason = "auto", None, "the BMC refused the fan command"
             pcie = settings["pcie_cooling"]
@@ -392,6 +397,7 @@ class Server:
                 self.log(error, "error")
                 notify(self, "refused", **vals)
             if failsafe and not was_failsafe:
+                self.counters["failsafe_trips"] += 1
                 notify(self, "failsafe", **vals)
             if was_failsafe and not failsafe:
                 self.log(f"Failsafe cleared at CPU {cpu:.0f}°C" if cpu is not None else "Failsafe cleared")

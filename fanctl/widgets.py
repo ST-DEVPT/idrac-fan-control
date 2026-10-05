@@ -5,7 +5,7 @@ import time
 from urllib.parse import urlsplit
 
 from .config import DATA_DIR, INTERVAL, write_json
-from .server import SERVERS
+from .server import SERVERS, fan_avg
 
 # What a dashboard widget (Homarr, an iframe) may show. The embed token reads only these, through
 # /api/widget: never the BMC address, settings, events or error messages.
@@ -47,11 +47,9 @@ def widget_view(srv, fields):
     if "cpu" in fields:
         out["cpu"] = s["cpu_temp"]
     if "fans" in fields:
-        pcts = [f["pct"] for f in sens.get("fans", []) if f["pct"] is not None]
-        rpms = [f["rpm"] for f in sens.get("fans", []) if f["rpm"] is not None]
-        out["fan_pct"] = (s["applied_speed"] if s["effective"] == "manual"
-                          else round(sum(pcts) / len(pcts)) if pcts else None)
-        out["fan_rpm"] = round(sum(rpms) / len(rpms)) if rpms else None
+        fans = sens.get("fans", [])
+        out["fan_pct"] = s["applied_speed"] if s["effective"] == "manual" else fan_avg(fans, "pct")
+        out["fan_rpm"] = fan_avg(fans, "rpm")
     if "power" in fields:
         out["watts"] = sens.get("watts")
     for key in ("inlet", "exhaust"):

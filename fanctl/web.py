@@ -46,6 +46,7 @@ STATIC = {  # allowlist: nothing outside it is ever read from disk
     "integrations.js": "text/javascript; charset=utf-8",
     "i18n.js": "text/javascript; charset=utf-8",
     "grafana.json": "application/json",
+    "prometheus-alerts.yml": "text/yaml; charset=utf-8",
     "icon.svg": "image/svg+xml",
     "fonts/archivo.woff2": "font/woff2",
     "fonts/plex-mono-400.woff2": "font/woff2",
