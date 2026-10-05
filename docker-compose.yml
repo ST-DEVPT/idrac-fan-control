@@ -1,6 +1,6 @@
 services:
   fan-control:
-    image: ghcr.io/st-devpt/rack-fan-control:latest
+    image: ghcr.io/st-devpt/rack-fan-control:2   # the major version: fixes and features, never a breaking change
     container_name: fan-control
     restart: unless-stopped
     ports:

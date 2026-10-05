@@ -1,6 +1,9 @@
 # Changelog
 
-## [2.1.0]
+Versions follow [semantic versioning](https://semver.org): a major version (`:2`) never removes a setting
+or changes what an existing one does, so pinning the image to it is safe.
+
+## [2.1.0] - 2026-10-05
 
 - **Smart mode, rebuilt.** It learns the fan speed each heat load needs on your server and goes straight
   there when the load changes. It judges temperatures where their trend puts them 40 s on, so heat is met
@@ -28,13 +31,13 @@
   app tile goes red when it should.
 - Fixed: opening the Prometheus, Grafana or Homarr page directly could leave it empty.
 
-## [2.0.1]
+## [2.0.1] - 2026-10-05
 
 - Redfish: follow redirects that stay on the same BMC. HPE iLO 4 answers `/redfish/v1/Chassis` with a
   308 to the trailing-slash path, which showed as "HTTP 308 Moved Permanently". Redirects to any other
   host are still refused, so the password never leaves the BMC.
 
-## [2.0.0]
+## [2.0.0] - 2026-10-05
 
 - Supports more than Dell: Supermicro (fan control, experimental), HPE iLO 4 with unlocked firmware
   (fan caps over SSH, experimental), any Redfish BMC such as HPE iLO 4/5/6 and Lenovo XCC, and any IPMI
@@ -69,12 +72,12 @@
 - Code split into the `fanctl` package; tests use `unittest` (`python -m unittest`); CI starts the image and
   checks it serves pages and a demo server before publishing.
 
-## [1.2.0]
+## [1.2.0] - 2026-10-04
 
 - Discord status reports: temperatures, fan speed, power, min/avg/max, time in Dell mode, trend lines
   and recent events for every server, on a schedule. By default one message is edited in place.
 
-## [1.1.0]
+## [1.1.0] - 2026-10-04
 
 - Several servers in one dashboard (`IDRAC_1_HOST`, `IDRAC_2_HOST`, ...), with tabs.
 - Ramp-down delay: fans speed up at once and slow down only after demand stays lower.
@@ -90,6 +93,6 @@
 - Security: strict Content-Security-Policy, origin check on POST, request size and time limits,
   container runs as uid 1000 with a read-only root filesystem.
 
-## [1.0.0]
+## [1.0.0] - 2026-10-04
 
 - First release: Dell, fixed and curve modes, failsafe, history, sign-in page.

@@ -95,8 +95,9 @@ Before adding a server, prepare its BMC:
 - **HPE and other Redfish**: any account that can read the system health. Redfish uses HTTPS (port 443).
 - **HPE iLO 4 unlocked**: SSH (port 22) and HTTPS must both be reachable, and the firmware must be the patched 2.77.
 
-Images are built for `linux/amd64` and `linux/arm64`: `ghcr.io/st-devpt/rack-fan-control:latest`,
-or pin a version such as `:2.0`.
+Images are built for `linux/amd64` and `linux/arm64`. Use the major version tag,
+`ghcr.io/st-devpt/rack-fan-control:2`: it takes every fix and feature of 2.x and never a change that breaks
+your settings. `:latest` follows the main branch, `:2.2` or `:2.2.0` pin a release.
 
 ## Configuration
 
