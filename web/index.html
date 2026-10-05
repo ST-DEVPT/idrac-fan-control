@@ -160,7 +160,7 @@
       <div class="fields">
         <div class="f">
           <label for="failsafe">CPU failsafe<small>At or above this, the BMC takes back control</small></label>
-          <div class="num"><input type="number" id="failsafe" step="1"><span class="muted tu">°C</span></div>
+          <div class="num"><input type="number" id="failsafe" min="40" max="90" step="1"><span class="muted tu">°C</span></div>
         </div>
         <div class="f">
           <label for="exhaust-limit">Exhaust air limit<small>Hands over too when the air leaving the server gets this hot. Empty turns it off</small></label>
@@ -174,7 +174,7 @@
         </div>
         <div class="f">
           <label for="min-speed">Minimum speed<small>Fans never go below this in fixed, curve and smart modes</small></label>
-          <div class="num"><input type="number" id="min-speed" min="0" max="60" step="1"><span class="muted">%</span></div>
+          <div class="num"><input type="number" id="min-speed" min="10" max="60" step="1"><span class="muted">%</span></div>
         </div>
         <div class="f">
           <label for="ramp">Ramp-down delay<small>Fans speed up at once, slow down only after lower demand lasts this long</small></label>

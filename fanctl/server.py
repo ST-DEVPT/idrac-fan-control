@@ -49,6 +49,12 @@ class Server:
         self.last_manual = None  # (speed, rpm) of the previous cycle, for the command check
         self.probe = None        # a speed change whose effect on the RPM is being checked
         self.ignored = False     # the BMC did not follow the last checked change
+        self.ignored_at = 0
+        self.known_temps = set()   # every temperature sensor seen since the loop started
+        self.missing = {}          # known sensor -> readings in a row it has been absent
+        self.blind_tried = 0       # last attempt to hand the fans back while the BMC could not be read
+        self.told_thresholds = False
+        self.resume_until = 0      # easing out of a failsafe until then
         self.saved = time.time()
         self.bad_settings = None  # last validation error of the settings file, logged once
         self.pcie_applied = None
@@ -81,6 +87,11 @@ class Server:
             saved = {}
         if saved.get("mode") == "dell":  # 1.x name of automatic mode
             saved["mode"] = "auto"
+        # 2.3 raised the floors: older files are brought inside them rather than refused
+        if type(saved.get("min_speed")) is int and saved["min_speed"] < 10:
+            saved["min_speed"] = 10
+        if type(saved.get("failsafe_temp")) in (int, float) and saved["failsafe_temp"] > 90:
+            saved["failsafe_temp"] = 90
         try:
             s = validate_settings(saved, dict(DEFAULT_SETTINGS))
             self.bad_settings = None
@@ -166,14 +177,60 @@ class Server:
                                  "watts": round(100 + cpu + random.uniform(-2, 2))})
 
     # ---- control loop
+    #
+    # One cycle: read the BMC, work out what could be wrong (protect), decide a speed, send it, then
+    # report. The rule throughout: when the controller does not know, the BMC decides. A missing CPU
+    # reading, a sensor that stops reporting or reports a fault, a failed fan, a BMC that ignores
+    # fan commands, an unreadable BMC: all of them hand the fans back.
+
+    FAILSAFE_HOLD = 300   # s the BMC keeps the fans once a limit tripped, however fast things cool
+    RESUME_SPEED = 50     # % manual control eases down from after a failsafe, instead of dropping at once
+    MISSING_AFTER = 2     # readings in a row a known sensor may be absent before it counts as lost
+    IGNORED_RETRY = 600   # s before manual control is tried again on a BMC that ignored it
+    BLIND_RETRY = 60      # s between attempts to hand the fans back while the BMC cannot be read
 
     def cycle(self):
-        now_local = time.localtime()
-        settings, (profile_cap, profile) = apply_schedule(self.settings(), now_local)
-        quiet = quiet_cap(settings["quiet"], now_local)
+        now = time.time()
+        local = time.localtime(now)
+        settings, (profile_cap, profile) = apply_schedule(self.settings(), local)
+        quiet = quiet_cap(settings["quiet"], local)
         # the lowest cap in force, and what to call it in the reason line
         cap, cap_name = min(((c, n) for c, n in ((quiet, "quiet hours"), (profile_cap, profile)) if c is not None),
                             default=(None, None))
+        dry = self.control and settings["dry_run"]
+        sensors = self.read_sensors(now, dry)
+        if sensors is None:
+            return
+        power = sensors.pop("power")
+
+        # only a CPU sensor counts as the CPU: standing in the inlet or a DIMM would run the fans on the
+        # floor while the CPU cooks, so without one the BMC decides
+        cpus = [t["value"] for t in sensors["temps"] if t["cpu"]]
+        cpu = max(cpus) if cpus else None
+        sensors["faults"] = self.faults(sensors, power, now)
+        was_failsafe = self.state["failsafe"]
+        effective, target, reason, failsafe = self.protect(settings, cpu, sensors, power, was_failsafe, now)
+
+        smart = None
+        if effective == "manual" and settings["mode"] == "smart":
+            with self.lock:  # forget_learned() clears the map from the HTTP thread
+                target, smart = smart_step(self.smart, self.learned, settings, cpu, sensors, now, cap)
+            smart["reason"] = smart["reason"].replace(", quiet hours cap", f", {cap_name} cap")
+            reason = smart["reason"]
+            if target is None:
+                effective, reason, smart = "auto", "smart mode has no temperature to aim at", None
+        else:
+            self.smart = {}  # start afresh next time smart mode takes over; what it learned stays
+        speed, reason = self.choose_speed(settings, effective, target, reason, smart, cap, cap_name, was_failsafe, failsafe, now)
+        effective, speed, reason, error = self.command(settings, effective, speed, reason, dry)
+        if effective is None:  # stopped while reading: release() owns the fans now
+            return
+        self.report(settings, sensors, power, cpu, effective, target, speed, reason, failsafe, was_failsafe,
+                    error, dry, smart, now)
+
+    def read_sensors(self, now, dry):
+        """The BMC's readings, or None when it cannot be read. Then the last manual speed would stay
+        with nobody watching, so the fans are handed back whenever the BMC still takes a command."""
         try:
             sensors = self.driver.read()
         except DriverError as e:
@@ -182,49 +239,103 @@ class Server:
                     self.log(f"Cannot read the BMC: {e}", "error")
                     if self.state["error"] is None:
                         notify(self, "unreachable", error=str(e))
-                self.state.update(error=str(e), updated=time.time())
-            return
-        power = sensors.pop("power")
+                self.state.update(error=str(e), updated=now)
+            if self.control and not dry and now - self.blind_tried > self.BLIND_RETRY:
+                self.blind_tried = now
+                with self.cmd_lock:
+                    if not self.stop.is_set():
+                        try:
+                            self.driver.set_auto()
+                            with self.lock:
+                                if self.state["effective"] != "auto":
+                                    self.log("Fans handed back to the BMC while it cannot be read", "warn")
+                                self.state.update(effective="auto", applied_speed=None,
+                                                  reason="the BMC cannot be read; it controls the fans")
+                        except DriverError:
+                            pass  # it doesn't answer at all; the error above says so already
+            return None
+        self.blind_tried = 0
         self.state["model"] = self.driver.model or self.state["model"]
+        if getattr(self.driver, "thresholds", None) == {} and not self.told_thresholds:
+            self.told_thresholds = True
+            self.log("The BMC's warning thresholds could not be read; protection follows the CPU and exhaust "
+                     "limits until they can (retried every 10 min)", "warn")
+        elif getattr(self.driver, "thresholds", None):
+            self.told_thresholds = False
+        return sensors
 
-        cpus = [t["value"] for t in sensors["temps"] if t["cpu"]]
-        cpu = max(cpus) if cpus else max((t["value"] for t in sensors["temps"]), default=None)
-        was_failsafe = self.state["failsafe"]
-        if self.control:
-            effective, target, reason, failsafe = decide(settings, cpu, was_failsafe, sensors)
-            if power == "off":
-                effective, target, reason = "auto", None, "server is powered off"
+    def faults(self, sensors, power, now):
+        """What makes the readings untrustworthy, each as a reason to hand the fans back: a sensor
+        that was there and is gone, one the BMC reports as faulty, a failed fan, a BMC that ignores
+        fan commands. Sensors are learned while the loop runs; a restart forgets removed hardware."""
+        present = {t["name"] for t in sensors["temps"]}
+        if power == "off":
+            self.missing = {}  # an idle host drops its CPU sensors; that is not a fault
         else:
-            effective, target, reason, failsafe = "monitor", None, "monitoring only", False
-        smart = None
-        if effective == "manual" and settings["mode"] == "smart":
-            with self.lock:  # forget_learned() clears the map from the HTTP thread
-                target, smart = smart_step(self.smart, self.learned, settings, cpu, sensors, time.time(), cap)
-            smart["reason"] = smart["reason"].replace(", quiet hours cap", f", {cap_name} cap")
-            reason = smart["reason"]
-            if target is None:
-                effective, reason, smart = "auto", "smart mode has no temperature to aim at", None
-        else:
-            self.smart = {}  # start afresh next time smart mode takes over; what it learned stays
-        speed = None
+            self.missing = {n: self.missing.get(n, 0) + 1 for n in self.known_temps - present}
+        self.known_temps |= present
+        out = [f"{n} stopped reporting" for n, c in sorted(self.missing.items()) if c >= self.MISSING_AFTER]
+        out += [f"{t['name']} reports a fault" for t in sensors["temps"] if t.get("ok") is False]
+        out += [f"fan {n} failed" for n in sorted(self.fans_failed)]
+        if self.ignored:
+            if now - self.ignored_at < self.IGNORED_RETRY:
+                out.append("the BMC ignored the last fan command")
+            else:
+                self.ignored = False
+                self.log("Trying manual fan control again")
+        return out
+
+    def protect(self, settings, cpu, sensors, power, was_failsafe, now):
+        """(effective, target, reason, failsafe). A failsafe holds for FAILSAFE_HOLD seconds even
+        when things cool at once, so the fans don't flap between the BMC and the controller."""
+        if not self.control:
+            return "monitor", None, "monitoring only", False
+        effective, target, reason, failsafe = decide(settings, cpu, was_failsafe, sensors)
+        if power == "off":
+            return "auto", None, "server is powered off", failsafe
+        if was_failsafe and not failsafe and self.failsafe_since and now - self.failsafe_since < self.FAILSAFE_HOLD:
+            left = self.FAILSAFE_HOLD - (now - self.failsafe_since)
+            return "auto", None, f"failsafe held for {left / 60:.0f} more min", True
+        return effective, target, reason, failsafe
+
+    def choose_speed(self, settings, effective, target, reason, smart, cap, cap_name, was_failsafe, failsafe, now):
+        """The speed to send in manual control, after ramp-down, caps, the driver's own floor and a
+        gentle way out of a failsafe."""
+        if effective != "manual":
+            with self.lock:
+                self.window.clear()
+            return None, reason
+        if was_failsafe and not failsafe:
+            self.resume_until = now + max(60, settings["ramp_down_seconds"])
         with self.lock:  # save_settings() clears the window from the HTTP thread
             if smart:
-                speed = target  # smart mode holds, slows down and keeps quiet hours on its own
-            elif effective == "manual":
-                speed = ramped(self.window, time.time(), target, settings["ramp_down_seconds"])
+                speed = target  # smart mode holds, slows down and keeps the caps on its own
             else:
-                self.window.clear()
-        if speed is not None and speed > target:
+                easing = now < self.resume_until
+                speed = ramped(self.window, now, max(target, self.RESUME_SPEED) if easing else target,
+                               settings["ramp_down_seconds"])
+        if speed > target and not smart:
             reason += f", holding {speed}% for ramp-down"
-        if cap is not None and speed is not None and not smart and speed > cap:
+        if cap is not None and not smart and speed > cap:
             speed = max(cap, settings["min_speed"])
             reason += f", {cap_name} cap {speed}%"
+        if smart and now < self.resume_until and speed < self.RESUME_SPEED:
+            speed = self.RESUME_SPEED
+            self.smart["last"] = float(speed)  # smart mode eases down from here at its own pace
+            reason += ", easing out of the failsafe"
+        floor = getattr(self.driver, "min_speed", 0)
+        if speed < floor:  # below this some BMCs see a stalled fan and go to full speed
+            speed = floor
+            reason += f", {self.driver.vendor} floor {floor}%"
+        return speed, reason
 
+    def command(self, settings, effective, speed, reason, dry):
+        """Send the decision. Returns (effective, speed, reason, error); effective None means the loop
+        was stopped while it worked and must not touch the fans."""
         error = None
-        dry = self.control and settings["dry_run"]
         with self.cmd_lock:
-            if self.stop.is_set():  # stopped while reading: release() owns the fans now
-                return
+            if self.stop.is_set():
+                return None, None, reason, None
             if dry:
                 # decide as usual, but leave the fans to the BMC: hand them over once, then send nothing
                 if not self.dry_released:
@@ -247,11 +358,16 @@ class Server:
             if self.control and not dry and self.driver.pcie and pcie is not None and pcie != self.pcie_applied:
                 try:
                     self.driver.set_pcie(pcie)
-                    self.log(f"Third-party PCIe cooling response {'enabled' if pcie else 'disabled'}")
+                    self.log(f"Third-party PCIe cooling response {'enabled' if pcie else 'disabled'}",
+                             "info" if pcie else "warn")
                 except DriverError as e:
                     self.log(f"Third-party PCIe cooling command refused: {e}", "error")
                 self.pcie_applied = pcie  # tried once per change, not every cycle
+        return effective, speed, reason, error
 
+    def report(self, settings, sensors, power, cpu, effective, target, speed, reason, failsafe, was_failsafe,
+               error, dry, smart, now):
+        """Events, alerts, state and history for one cycle."""
         vals = {"cpu": "—" if cpu is None else f"{cpu:.0f}", "reason": reason, "error": error or "",
                 "speed": speed_text(effective, speed)}
         with self.lock:
@@ -275,42 +391,43 @@ class Server:
             if was_failsafe and not failsafe:
                 self.log(f"Failsafe cleared at CPU {cpu:.0f}°C" if cpu is not None else "Failsafe cleared")
                 notify(self, "failsafe_cleared", **vals)
-            cfg = alert_config()
-            threshold = cfg["hot_threshold"]
-            if cpu is not None and cpu >= threshold and not self.hot:
-                self.hot = True
-                notify(self, "hot", **vals)
-            elif cpu is None or cpu < threshold - 3:
-                self.hot = False
-            inlet = sensors["inlet"]
-            if inlet is not None and inlet >= cfg["inlet_threshold"] and not self.inlet_hot:
-                self.inlet_hot = True
-                self.log(f"Inlet air at {inlet:.0f}°C: the room is running hot", "warn")
-                notify(self, "inlet_hot", **vals, inlet=f"{inlet:.0f}")
-            elif inlet is None or inlet < cfg["inlet_threshold"] - 2:
-                self.inlet_hot = False
-            if failsafe:
-                self.failsafe_since = self.failsafe_since or time.time()
-                minutes = (time.time() - self.failsafe_since) / 60
-                if minutes >= cfg["failsafe_minutes"] and not self.failsafe_told:
-                    self.failsafe_told = True
-                    self.log(f"Failsafe for {minutes:.0f} min", "error")
-                    notify(self, "failsafe_long", **vals, minutes=f"{minutes:.0f}")
-            else:
-                self.failsafe_since, self.failsafe_told = None, False
+            self.check_limits(sensors, cpu, failsafe, vals, now)
             self.check_fans(sensors["fans"], vals)
             self.check_response(effective if not dry else "dry", speed, sensors["fans"], vals)
             self.state.update(sensors=sensors, cpu_temp=cpu, effective=effective, applied_speed=speed,
                               target_speed=target, reason=reason, failsafe=failsafe, error=error,
-                              updated=time.time(), power=power, dry_run=dry, smart=smart,
+                              updated=now, power=power, dry_run=dry, smart=smart,
                               smart_map=learned_curve(self.learned, settings, sensors["inlet"]))
-            rpms = [f["rpm"] for f in sensors["fans"] if f["rpm"] is not None]
-            pcts = [f["pct"] for f in sensors["fans"] if f["pct"] is not None]
-            self.record({"t": round(time.time()), "cpu": cpu, "speed": speed,
-                                 "inlet": sensors["inlet"], "exhaust": sensors["exhaust"],
-                                 "rpm": round(sum(rpms) / len(rpms)) if rpms else None,
-                                 "fanpct": round(sum(pcts) / len(pcts)) if pcts else None,
-                                 "watts": sensors["watts"]})
+            self.record({"t": round(now), "cpu": cpu, "speed": speed,
+                         "inlet": sensors["inlet"], "exhaust": sensors["exhaust"],
+                         "rpm": fan_avg(sensors["fans"], "rpm"), "fanpct": fan_avg(sensors["fans"], "pct"),
+                         "watts": sensors["watts"]})
+
+    def check_limits(self, sensors, cpu, failsafe, vals, now):
+        """The temperature alerts: running hot, room running hot, failsafe lasting. Called with self.lock held."""
+        cfg = alert_config()
+        threshold = cfg["hot_threshold"]
+        if cpu is not None and cpu >= threshold and not self.hot:
+            self.hot = True
+            notify(self, "hot", **vals)
+        elif cpu is None or cpu < threshold - 3:
+            self.hot = False
+        inlet = sensors["inlet"]
+        if inlet is not None and inlet >= cfg["inlet_threshold"] and not self.inlet_hot:
+            self.inlet_hot = True
+            self.log(f"Inlet air at {inlet:.0f}°C: the room is running hot", "warn")
+            notify(self, "inlet_hot", **vals, inlet=f"{inlet:.0f}")
+        elif inlet is None or inlet < cfg["inlet_threshold"] - 2:
+            self.inlet_hot = False
+        if failsafe:
+            self.failsafe_since = self.failsafe_since or now
+            minutes = (now - self.failsafe_since) / 60
+            if minutes >= cfg["failsafe_minutes"] and not self.failsafe_told:
+                self.failsafe_told = True
+                self.log(f"Failsafe for {minutes:.0f} min", "error")
+                notify(self, "failsafe_long", **vals, minutes=f"{minutes:.0f}")
+        else:
+            self.failsafe_since, self.failsafe_told = None, False
 
     def check_fans(self, fans, vals):
         """A fan that stops while the others spin. Two readings in a row, so one odd value is ignored.
@@ -331,9 +448,8 @@ class Server:
         """A BMC that accepts fan commands but ignores them (after a reset, or firmware that locks its
         fans) leaves the server on a speed nobody chose. After the speed moves by 20 points or more,
         the average RPM has to move the same way by 10 % within 30 s. Called with self.lock held."""
-        rpms = [f["rpm"] for f in fans if f["rpm"]]
-        rpm = sum(rpms) / len(rpms) if rpms else None
-        if effective != "manual" or speed is None or rpm is None:
+        rpm = fan_avg(fans, "rpm", whole=False)
+        if effective != "manual" or speed is None or not rpm:
             self.last_manual = self.probe = None
             return
         now = time.time()
@@ -347,7 +463,7 @@ class Server:
         followed = (rpm - self.probe["rpm"]) / self.probe["rpm"] * self.probe["dir"] >= 0.10
         self.probe = None
         if not followed and not self.ignored:
-            self.ignored = True
+            self.ignored, self.ignored_at = True, now
             self.log(f"The BMC did not follow the fans to {speed}%: their RPM stayed near {rpm:.0f}", "error")
             notify(self, "ignored", **vals)
         elif followed and self.ignored:
@@ -363,14 +479,22 @@ class Server:
             self.long.append(aggregate(self.bucket))
             self.bucket = []
 
-    def release(self):
-        """Hand the fans back to the BMC: on shutdown, removal, or a change of driver."""
-        if self.control:
-            with self.cmd_lock:
-                try:
-                    self.driver.set_auto()
-                except DriverError as e:
-                    print(f"[{self.id}] could not restore automatic fan control:", e, file=sys.stderr)
+    def release(self, timeout=None):
+        """Hand the fans back to the BMC: on shutdown, removal, a change of driver or a stalled loop.
+        timeout: how long to wait for a loop busy sending a command. Past it the command goes anyway,
+        since a stuck loop must not keep the fans in manual."""
+        if not self.control:
+            return True
+        locked = self.cmd_lock.acquire(timeout=-1 if timeout is None else timeout)
+        try:
+            self.driver.set_auto()
+            return True
+        except DriverError as e:
+            self.log(f"Could not hand the fans back to the BMC: {e}", "error")
+            return False
+        finally:
+            if locked:
+                self.cmd_lock.release()
 
     def start(self):
         self.thread = threading.Thread(target=self.run, daemon=True, name=self.id)
@@ -416,10 +540,7 @@ class Server:
                 "dry_run": s["dry_run"], "reason": s["reason"],
                 "power": s["power"], "updated": s["updated"],
                 "watts": (s["sensors"] or {}).get("watts"), "inlet": (s["sensors"] or {}).get("inlet"),
-                "fan_pct": round(sum(f["pct"] for f in fans if f["pct"] is not None) / max(1, sum(f["pct"] is not None for f in fans)))
-                if any(f["pct"] is not None for f in fans) else None,
-                "fan_rpm": round(sum(f["rpm"] for f in fans if f["rpm"] is not None) / max(1, sum(f["rpm"] is not None for f in fans)))
-                if any(f["rpm"] is not None for f in fans) else None,
+                "fan_pct": fan_avg(fans, "pct"), "fan_rpm": fan_avg(fans, "rpm"),
                 "spark": [[p["t"], p["cpu"], p["speed"]] for p in hour[::step]]}
 
 
@@ -428,6 +549,33 @@ def stalled(servers):
     now = time.time()
     return [s.id for s in list(servers) if s.thread and not s.stop.is_set()
             and (not s.thread.is_alive() or now - s.tick > STALL_SECONDS)]
+
+
+def fan_avg(fans, key, whole=True):
+    """Average of one fan reading ("rpm" or "pct") over the fans that report it, or None."""
+    vals = [f[key] for f in fans if f.get(key) is not None]
+    if not vals:
+        return None
+    avg = sum(vals) / len(vals)
+    return round(avg) if whole else avg
+
+
+def release_all(servers, deadline=40):
+    """Stop every loop, then hand every server's fans back at the same time: one slow BMC must not
+    use up the time the others need before Docker gives up waiting. Returns the ids not released."""
+    servers = list(servers)
+    for s in servers:  # first, so no loop can send manual control again after its release
+        s.stop.set()
+        s.wake.set()
+    done = {}
+    threads = [threading.Thread(target=lambda s=s: done.__setitem__(s.id, s.release(timeout=5)), daemon=True)
+               for s in servers]
+    for t in threads:
+        t.start()
+    end = time.time() + deadline
+    for t in threads:
+        t.join(max(0, end - time.time()))
+    return [s.id for s in servers if not done.get(s.id)]
 
 
 # ---------------------------------------------------------------- server registry

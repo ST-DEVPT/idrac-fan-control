@@ -13,7 +13,7 @@ from http.server import ThreadingHTTPServer
 
 from fanctl import config, updates, web
 from fanctl.alerts import DISCORD_WEBHOOK, WEBHOOK_RE, reporter
-from fanctl.server import SERVERS, load_registry, stalled
+from fanctl.server import SERVERS, load_registry, release_all, stalled
 
 
 def data_dir_writable():
@@ -28,9 +28,14 @@ def data_dir_writable():
 
 
 def shutdown(*_):
+    """docker stop: every fan back to its BMC, all servers at once, well inside the grace period
+    (stop_grace_period: 60s in the compose file; Docker's default is 10 s)."""
     for s in list(SERVERS.values()):
         s.log("Stopping: handing fans back to automatic control")
-        s.release()
+    failed = release_all(SERVERS.values(), deadline=40)
+    if failed:
+        print(f"ERROR could not hand the fans back for {', '.join(failed)}", flush=True)
+    for s in list(SERVERS.values()):
         s.save_history()
     os._exit(0)
 
@@ -44,9 +49,7 @@ def watchdog():
         stuck = stalled(SERVERS.values())
         if stuck:
             print(f"ERROR: control loop stalled for {', '.join(stuck)}; handing fans back and restarting", flush=True)
-            for s in list(SERVERS.values()):  # in threads: a stuck loop may hold the command lock
-                threading.Thread(target=s.release, daemon=True).start()
-            time.sleep(10)
+            release_all(SERVERS.values(), deadline=20)  # a stuck loop's lock is not waited on for long
             os._exit(1)
 
 

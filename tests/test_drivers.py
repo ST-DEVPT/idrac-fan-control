@@ -30,7 +30,8 @@ ILO_POWER = {"PowerControl": [{"PowerConsumedWatts": 118}]}
 class Recording:
     """Records ipmitool calls instead of running them."""
     def __init__(self, *a, **kw):
-        super().__init__("10.0.0.1", "root", "x")
+        import tempfile
+        super().__init__("10.0.0.1", "root", "x", data_dir=tempfile.mkdtemp(prefix="fanctl-drv-"))
         self.sent = []
 
     def ipmi(self, *args, timeout=20):
@@ -57,7 +58,8 @@ class DeadDell(Recording, drivers.DellDriver):
 
 
 class FakeSupermicro(Recording, drivers.SupermicroDriver):
-    pass
+    def answer(self, args):
+        return " 04\n" if args[1:4] == ("0x30", "0x45", "0x00") else ""  # the user had HeavyIO
 
 
 class FakeILO(drivers.ILO4UnlockedDriver):
@@ -146,7 +148,8 @@ class Supermicro(unittest.TestCase):
     def test_full_mode_then_both_zones(self):
         d = FakeSupermicro()
         d.set_speed(35)
-        self.assertEqual(d.sent, [("raw", "0x30", "0x45", "0x01", "0x01"),
+        self.assertEqual(d.sent, [("raw", "0x30", "0x45", "0x00"),          # the mode it had, read first
+                                  ("raw", "0x30", "0x45", "0x01", "0x01"),
                                   ("raw", "0x30", "0x70", "0x66", "0x01", "0x00", "0x23"),
                                   ("raw", "0x30", "0x70", "0x66", "0x01", "0x01", "0x23")])
         d.sent.clear()
@@ -154,9 +157,20 @@ class Supermicro(unittest.TestCase):
         self.assertEqual(d.sent, [("raw", "0x30", "0x70", "0x66", "0x01", "0x00", "0x28"),
                                   ("raw", "0x30", "0x70", "0x66", "0x01", "0x01", "0x28")])
         d.set_auto()
-        self.assertEqual(d.sent[-1], ("raw", "0x30", "0x45", "0x01", "0x02"))
+        self.assertEqual(d.sent[-1], ("raw", "0x30", "0x45", "0x01", "0x04"))  # HeavyIO back, not Optimal
         d.set_speed(40)  # after a release, Full mode is needed again
         self.assertEqual(d.sent[-3], ("raw", "0x30", "0x45", "0x01", "0x01"))
+
+    def test_original_mode_survives_a_restart(self):
+        first = FakeSupermicro()
+        first.set_speed(30)
+        again = FakeSupermicro()
+        again.data_dir, again.mode_file = first.data_dir, first.mode_file
+        again.answer = lambda args: " 01\n"  # the BMC is still in Full mode from before the restart
+        again.set_speed(30)
+        again.set_auto()
+        self.assertEqual(again.sent[-1], ("raw", "0x30", "0x45", "0x01", "0x04"))
+        self.assertNotIn(("raw", "0x30", "0x45", "0x00"), again.sent)  # read from disk, not taken for Full
 
 
 class ILO4(unittest.TestCase):

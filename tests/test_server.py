@@ -1,6 +1,7 @@
+import json
 import unittest
 
-from fanctl.config import write_json
+from fanctl.config import DATA_DIR as DATA, write_json
 from fanctl.server import SERVERS, Server, env_servers, validate_server
 
 
@@ -123,11 +124,11 @@ class Checks(unittest.TestCase):
 class Scheduled(unittest.TestCase):
     def test_profile_caps_the_speed(self):
         srv = Recorder("scheduled")
-        always = {"name": "Night", "days": list(range(7)), "start": "00:00", "end": "00:00", "max_speed": 15, "smart_target": None}
+        always = {"name": "Night", "days": list(range(7)), "start": "00:00", "end": "00:00", "max_speed": 25, "smart_target": None}
         write_json(srv.settings_file, {"mode": "fixed", "fixed_speed": 50, "schedule": [always]})
         srv.cycle()
-        self.assertEqual(srv.calls, [15])
-        self.assertTrue(srv.state["reason"].endswith(", Night cap 15%"))
+        self.assertEqual(srv.calls, [25])
+        self.assertTrue(srv.state["reason"].endswith(", Night cap 25%"))
         srv.settings_file.unlink()
 
 
@@ -180,6 +181,126 @@ class Recorder(Server):
         drv = self.driver
         drv.set_auto = lambda: self.calls.append("auto")
         drv.set_speed = lambda pct: self.calls.append(pct)
+
+
+def reading(temps, fans=None, power="on"):
+    """A BMC reading: temps as (name, value, ok)."""
+    return {"temps": [{"name": n, "entity": "", "value": v, "cpu": n.startswith("CPU"), "ok": ok, "warn": None}
+                      for n, v, ok in temps],
+            "fans": fans or [{"name": f"Fan{i}", "rpm": 4000, "pct": None, "ok": True} for i in range(1, 4)],
+            "watts": 150, "power": power, "inlet": 22, "exhaust": None}
+
+
+class Scripted(Recorder):
+    """A recorded server whose BMC answers what the test says."""
+    def __init__(self, sid, settings=None):
+        super().__init__(sid)
+        self.answers = []
+        self.driver.read = self.next_reading
+        write_json(self.settings_file, settings or {"mode": "fixed", "fixed_speed": 30})
+
+    def next_reading(self):
+        answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        if isinstance(answer, Exception):
+            raise answer
+        return json.loads(json.dumps(answer))  # a fresh copy each time, as a real read gives
+
+
+class FailSafe(unittest.TestCase):
+    """When the controller does not know, the BMC decides."""
+    OK = [("CPU 1", 50, True), ("CPU 2", 48, True), ("Inlet Temp", 22, True)]
+
+    def tearDown(self):
+        for f in DATA.glob("settings-fs-*.json"):
+            f.unlink()
+
+    def test_no_cpu_reading_means_automatic(self):
+        srv = Scripted("fs-nocpu")
+        srv.answers = [reading([("Inlet Temp", 22, True), ("DIMM", 35, True)])]
+        srv.cycle()
+        self.assertEqual((srv.calls, srv.state["effective"]), (["auto"], "auto"))
+        self.assertIn("no CPU", srv.state["reason"])
+
+    def test_unreadable_bmc_gets_the_fans_back(self):
+        from fanctl.drivers import DriverError
+        srv = Scripted("fs-blind")
+        srv.answers = [reading(self.OK)]
+        srv.cycle()
+        self.assertEqual(srv.calls, [30])
+        srv.answers = [DriverError("timed out")]
+        srv.cycle()
+        srv.cycle()                                   # tried once a minute, not every cycle
+        self.assertEqual(srv.calls, [30, "auto"])
+        self.assertEqual(srv.state["effective"], "auto")
+
+    def test_a_sensor_that_disappears_trips_the_failsafe(self):
+        srv = Scripted("fs-missing")
+        srv.answers = [reading(self.OK), reading(self.OK[:1] + self.OK[2:])]
+        srv.cycle()
+        srv.cycle()                                   # one missing reading is forgiven
+        self.assertFalse(srv.state["failsafe"])
+        srv.cycle()
+        self.assertTrue(srv.state["failsafe"])
+        self.assertEqual(srv.state["reason"], "CPU 2 stopped reporting")
+        self.assertEqual(srv.calls[-1], "auto")
+
+    def test_a_faulty_sensor_or_a_failed_fan_trips_it(self):
+        srv = Scripted("fs-fault")
+        srv.answers = [reading(self.OK[:2] + [("PCIe", 60, False)])]
+        srv.cycle()
+        self.assertEqual(srv.state["reason"], "PCIe reports a fault")
+        fan = Scripted("fs-fan")
+        dead = [{"name": "Fan1", "rpm": 0, "pct": None, "ok": True}] + [
+            {"name": f"Fan{i}", "rpm": 4000, "pct": None, "ok": True} for i in (2, 3)]
+        fan.answers = [reading(self.OK, dead)]
+        fan.cycle()
+        fan.cycle()                                   # two readings to count as failed
+        fan.cycle()
+        self.assertEqual((fan.state["reason"], fan.calls[-1]), ("fan Fan1 failed", "auto"))
+
+    def test_failsafe_holds_then_eases_down(self):
+        srv = Scripted("fs-hold", {"mode": "fixed", "fixed_speed": 30, "ramp_down_seconds": 60})
+        srv.answers = [reading([("CPU 1", 80, True)])]
+        srv.cycle()
+        self.assertTrue(srv.state["failsafe"])
+        srv.answers = [reading([("CPU 1", 40, True)])]
+        srv.cycle()                                   # cool at once, but the BMC keeps the fans for a while
+        self.assertTrue(srv.state["failsafe"])
+        self.assertIn("failsafe held", srv.state["reason"])
+        srv.failsafe_since -= 301
+        srv.cycle()
+        self.assertFalse(srv.state["failsafe"])
+        self.assertEqual(srv.calls[-1], 50)           # back to manual from 50 %, not straight to 30 %
+
+    def test_vendor_floor(self):
+        srv = Scripted("fs-floor", {"mode": "fixed", "fixed_speed": 20})
+        srv.driver.min_speed, srv.driver.vendor = 25, "Supermicro"
+        srv.answers = [reading(self.OK)]
+        srv.cycle()
+        self.assertEqual(srv.calls, [25])
+        self.assertIn("Supermicro floor 25%", srv.state["reason"])
+
+
+class Shutdown(unittest.TestCase):
+    def test_all_servers_released_together(self):
+        import time as t
+        from fanctl.server import release_all
+        slow, fast = Recorder("slow"), Recorder("fast")
+        slow.driver.set_auto = lambda: (t.sleep(2), slow.calls.append("auto"))
+        start = t.time()
+        self.assertEqual(release_all([slow, fast], deadline=10), [])
+        self.assertLess(t.time() - start, 3.5)        # in parallel: one slow BMC doesn't delay the rest
+        self.assertEqual((slow.calls, fast.calls), (["auto"], ["auto"]))
+        self.assertTrue(slow.stop.is_set() and fast.stop.is_set())
+
+    def test_a_stuck_loop_does_not_block_the_release(self):
+        srv = Recorder("stuck")
+        srv.cmd_lock.acquire()                        # a loop stuck mid-command
+        try:
+            self.assertTrue(srv.release(timeout=0.2))
+        finally:
+            srv.cmd_lock.release()
+        self.assertEqual(srv.calls, ["auto"])
 
 
 class DryRun(unittest.TestCase):

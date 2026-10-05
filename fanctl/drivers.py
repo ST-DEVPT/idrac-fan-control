@@ -211,6 +211,7 @@ class IPMIDriver(Driver):
         return r.stdout
 
     thresholds = None  # read once: `ipmitool sensor` is slow and thresholds don't change
+    thresholds_at = 0  # when they were last tried, to retry a failed read every 10 min
 
     def diagnose(self):
         out = {}
@@ -223,7 +224,8 @@ class IPMIDriver(Driver):
         return out
 
     def read(self):
-        if self.thresholds is None:
+        if self.thresholds is None or (not self.thresholds and time.time() - self.thresholds_at > 600):
+            self.thresholds_at = time.time()
             try:
                 self.thresholds = parse_thresholds(self.ipmi("sensor", timeout=60))
             except DriverError:
@@ -295,24 +297,53 @@ class DellDriver(IPMIDriver):
 
 class SupermicroDriver(IPMIDriver):
     kind = "supermicro"
-    label = "Supermicro (X9 / X10 / X11)"
+    label = "Supermicro (X10 / X11 / X12)"
     vendor = "Supermicro"
-    description = "Switches the BMC to Full fan mode and sets the CPU and peripheral zones. Experimental."
+    description = ("Switches the BMC to Full fan mode and sets the CPU and peripheral zones; gives the BMC "
+                   "back the mode it had. X10, X11 and X12 boards. Experimental.")
+    min_speed = 25  # below about this many fans read under their lower critical RPM and the BMC goes to full
     control = True
     experimental = True
     monitor_reason = ""
 
     REASSERT = 600  # switch to Full mode again every 10 min, in case the BMC was reset
+    MODES = {0: "Standard", 1: "Full", 2: "Optimal", 4: "HeavyIO"}
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.full_since = None
+        self.mode_file = os.path.join(self.data_dir, f"supermicro-{re.sub(r'[^A-Za-z0-9.-]', '_', self.host)}.json")
+        self.original = None  # the fan mode the BMC had before Fan Control, restored on release
+
+    def remember_mode(self):
+        """Read the BMC's fan mode once, before taking over, and keep it on disk, so a restart in the
+        middle still restores the user's choice (HeavyIO on a GPU box, say) and not a default."""
+        if self.original is not None:
+            return
+        try:
+            with open(self.mode_file, encoding="utf-8") as f:
+                self.original = int(json.load(f)["mode"])
+                return
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        try:
+            mode = int(self.ipmi("raw", "0x30", "0x45", "0x00").split()[0], 16)
+        except (DriverError, ValueError, IndexError):
+            mode = 2
+        self.original = 2 if mode == 1 or mode not in self.MODES else mode  # Full is ours, not theirs
+        try:
+            with open(self.mode_file, "w", encoding="utf-8") as f:
+                json.dump({"mode": self.original}, f)
+        except OSError:
+            pass
 
     def set_auto(self):
         self.full_since = None
-        self.ipmi("raw", "0x30", "0x45", "0x01", "0x02")  # Optimal mode
+        mode = 2 if self.original is None else self.original
+        self.ipmi("raw", "0x30", "0x45", "0x01", f"0x{mode:02x}")
 
     def set_speed(self, pct):
+        self.remember_mode()
         try:
             # Full mode stops the BMC overriding the duty cycle. Switching modes resets the fans on some
             # boards, so it is sent once (and re-asserted now and then), not on every cycle.
@@ -484,10 +515,7 @@ class ILO4UnlockedDriver(RedfishDriver):
 
     def set_auto(self):
         self.sent = None
-        try:
-            self.caps(255)  # no cap: the iLO decides
-        except DriverError:
-            pass
+        self.caps(255)  # no cap: the iLO decides. A failure raises: a low cap left behind must be heard of
 
 
 # ---------------------------------------------------------------- demo

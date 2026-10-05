@@ -50,7 +50,7 @@ everything else.
 | Type | Servers | Fan control | Reads |
 | --- | --- | --- | --- |
 | **Dell PowerEdge (iDRAC)** | iDRAC 6, 7, 8, and iDRAC 9 up to firmware 3.30.30.30 | Yes | IPMI |
-| **Supermicro** | X9, X10 and X11 boards | Yes, experimental | IPMI |
+| **Supermicro** | X10, X11 and X12 boards | Yes, experimental | IPMI |
 | **HPE iLO 4, unlocked firmware** | ProLiant Gen8 / Gen9 with the community-patched iLO 4 2.77 | Yes (caps over SSH), experimental | Redfish |
 | **Redfish** | HPE iLO 4 (2.30+), iLO 5, iLO 6, Lenovo XCC, Dell iDRAC 9, most recent BMCs | Monitoring only | Redfish |
 | **Other IPMI** | Any BMC with IPMI over LAN | Monitoring only | IPMI |
@@ -197,11 +197,21 @@ The BMC takes over, whatever the mode, when:
 - the exhaust air reaches the **exhaust air limit** (on by default, empty turns it off);
 - any sensor comes within the margin (5 °C by default) of the **warning threshold its BMC defines**:
   PCIe cards, disks, DIMMs, the RAID controller, which a CPU-only curve would never see;
-- there is no CPU reading, the server is off, a fan command is refused, the control loop fails, the
-  server is removed or the container stops.
+- anything is unknown: there is no CPU reading (no other sensor ever stands in for the CPU), the BMC
+  cannot be read (the fans are handed back as soon as it takes a command again), a temperature sensor
+  that was there stops reporting or reports a fault, a fan fails, or the BMC ignored the last fan command;
+- the server is off, a fan command is refused, the control loop fails or stalls, the server is removed or
+  the container stops.
 
-Manual control resumes once things are 3 °C below the limit that tripped, so the fans don't flap at the
-edge. Fans never run below the **minimum speed** in manual modes.
+Once a limit trips, the BMC keeps the fans for at least 5 minutes, and manual control resumes only when
+things are 3 °C below the limit, starting from 50 % and easing down; so the fans don't flap at the edge.
+Fans never run below the **minimum speed** (20 % by default, 10 % at the lowest: cards without a sensor,
+HBAs, NICs, NVMe drives and GPUs, are cooled by that airflow alone). Supermicro boards never go below 25 %,
+where their fans would read under the BMC's lower critical RPM. The failsafe can be set up to 90 °C.
+
+When the controller hands a Supermicro back, the BMC gets the fan mode it had before (Standard,
+Optimal or HeavyIO), read once and kept in the data folder. On `docker stop` every server is released at
+the same time; the example compose file gives it 60 s (`stop_grace_period`), where Docker's default is 10 s.
 
 **If the controller itself stops.** A control loop that stops turning for 3 minutes trips a watchdog:
 every fan goes back to its BMC and the process exits, so Docker's restart policy (`restart:

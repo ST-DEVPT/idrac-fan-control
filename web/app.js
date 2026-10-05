@@ -417,7 +417,7 @@ $$(".seg button").forEach(b => b.onclick = () => { draft.mode = b.dataset.mode; 
 $("#fixed").oninput = e => { draft.fixed_speed = +e.target.value; touch(); };
 $("#smart-target").oninput = e => { draft.smart_target = fromT(+e.target.value); touch(); };
 $$("[data-preset]").forEach(b => b.onclick = () => { draft.fixed_speed = +b.dataset.preset; $("#fixed").value = draft.fixed_speed; touch(); });
-$("#failsafe").oninput = e => { const v = fromT(+e.target.value); if (v >= 40 && v <= 100) { draft.failsafe_temp = v; touch(); } };
+$("#failsafe").oninput = e => { const v = fromT(+e.target.value); if (v >= 40 && v <= 90) { draft.failsafe_temp = v; touch(); } };
 $("#ramp").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) && v >= 0 && v <= 600) { draft.ramp_down_seconds = v; touch(); } };
 $$("[data-pcie]").forEach(b => b.onclick = () => { draft.pcie_cooling = JSON.parse(b.dataset.pcie); touch(); });
 $$("[data-thr]").forEach(b => b.onclick = () => { draft.bmc_thresholds = b.dataset.thr === "true"; touch(); });
@@ -426,7 +426,7 @@ $$("[data-quiet]").forEach(b => b.onclick = () => { draft.quiet = { ...draft.qui
 $("#quiet-start").onchange = e => { if (e.target.value) { draft.quiet = { ...draft.quiet, start: e.target.value }; touch(); } };
 $("#quiet-end").onchange = e => { if (e.target.value) { draft.quiet = { ...draft.quiet, end: e.target.value }; touch(); } };
 $("#quiet-max").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) && v >= 0 && v <= 100) { draft.quiet = { ...draft.quiet, max_speed: v }; touch(); } };
-$("#min-speed").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) && v >= 0 && v <= 60) { draft.min_speed = v; touch(); } };
+$("#min-speed").oninput = e => { const v = +e.target.value; if (Number.isInteger(v) && v >= 10 && v <= 60) { draft.min_speed = v; touch(); } };
 $("#exhaust-limit").oninput = e => {
   const raw = e.target.value.trim(), v = fromT(+raw);
   if (raw === "") { draft.exhaust_limit = null; touch(); } else if (v >= 30 && v <= 90) { draft.exhaust_limit = v; touch(); }

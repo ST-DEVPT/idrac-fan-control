@@ -12,7 +12,8 @@ DEFAULT_SETTINGS = {
     "failsafe_temp": 75,       # at or above this CPU temp, hand control back to the BMC
     "ramp_down_seconds": 60,   # fans speed up at once, slow down only after this long
     "pcie_cooling": None,      # None = leave untouched, True/False = enforce
-    "min_speed": 10,           # never run the fans slower than this in manual modes
+    "min_speed": 20,           # never run the fans slower than this in manual modes: cards without a
+                               # sensor (HBAs, NICs, NVMe, GPUs) are cooled by this airflow alone
     "exhaust_limit": 60,       # °C of exhaust air at which the BMC takes over; None turns it off
     "bmc_thresholds": True,    # also hand over when any sensor nears the warning threshold the BMC defines
     "threshold_margin": 5,     # how far below that threshold, in °C
@@ -49,6 +50,9 @@ def hazard(settings, cpu_temp, sensors=None, tripped=False):
     """
     def over(value, limit):
         return value >= limit or (tripped and value > limit - FAILSAFE_HYSTERESIS)
+
+    for fault in (sensors or {}).get("faults", []):  # missing or faulty readings, failed fans
+        return fault
 
     limit = settings["failsafe_temp"]
     if cpu_temp is not None and over(cpu_temp, limit):
@@ -168,8 +172,8 @@ def validate_settings(new, current):
         raise ValueError("mode must be auto, fixed, curve or smart")
     if not (type(s["fixed_speed"]) is int and 0 <= s["fixed_speed"] <= 100):
         raise ValueError("fixed speed must be a whole number from 0 to 100")
-    if not (type(s["failsafe_temp"]) in (int, float) and 40 <= s["failsafe_temp"] <= 100):
-        raise ValueError("failsafe temperature must be between 40 and 100 °C")
+    if not (type(s["failsafe_temp"]) in (int, float) and 40 <= s["failsafe_temp"] <= 90):
+        raise ValueError("failsafe temperature must be between 40 and 90 °C")
     if not (type(s["ramp_down_seconds"]) is int and 0 <= s["ramp_down_seconds"] <= 600):
         raise ValueError("ramp-down delay must be a whole number of seconds from 0 to 600")
     c = s["curve"]
@@ -180,8 +184,8 @@ def validate_settings(new, current):
     s["curve"] = sorted([round(p[0]), round(p[1])] for p in c)
     if s["pcie_cooling"] not in (None, True, False):
         raise ValueError("pcie_cooling must be null, true or false")
-    if not (type(s["min_speed"]) is int and 0 <= s["min_speed"] <= 60):
-        raise ValueError("minimum speed must be a whole number from 0 to 60")
+    if not (type(s["min_speed"]) is int and 10 <= s["min_speed"] <= 60):
+        raise ValueError("minimum speed must be a whole number from 10 to 60")
     if s["exhaust_limit"] is not None and not (type(s["exhaust_limit"]) in (int, float) and 30 <= s["exhaust_limit"] <= 90):
         raise ValueError("exhaust limit must be between 30 and 90 °C, or empty to turn it off")
     if not (type(s["threshold_margin"]) in (int, float) and 0 <= s["threshold_margin"] <= 20):
@@ -252,6 +256,9 @@ SMART_YIELD = 8             # °C below a trip point where quiet hours start to 
 SMART_YIELD_RATE = 10       # ...by this many % per °C closer
 SMART_LOAD_TAU = 60         # s: power is averaged over about this long; a burst shorter than the
                             # heatsink can feel should not move the fans
+SMART_FAN_WATTS = 80        # what the fans of a 1U/2U server draw at 100 %, roughly; their power grows with the
+                            # cube of speed and is taken out of the load, or more fan would read as more heat
+SMART_EXTRAPOLATE = 15      # % the map may be carried past its last learned point; the trim does the rest
 SMART_LEARN_RATE = 1 / 120  # per second of steady running: a few minutes to trust a new reading
 SMART_BIN = 1.05            # map resolution: one point per 5 % of heat load
 
@@ -313,7 +320,7 @@ def map_speed(learned, load):
         if load <= x1:
             return v0 + (v1 - v0) * (load - x0) / (x1 - x0)
     (x0, v0), (x1, v1) = pts[0], pts[-1]
-    return min(100, v1 + ((v1 - v0) / (x1 - x0) * (load - x1) if x1 > x0 else 0))
+    return min(100, v1 + min(SMART_EXTRAPOLATE, (v1 - v0) / (x1 - x0) * (load - x1) if x1 > x0 else 0))
 
 
 def learned_curve(learned, settings, inlet):
@@ -388,8 +395,11 @@ def smart_step(memory, learned, settings, cpu, sensors, now, ceiling=None):
     worst = max(items, key=lambda x: x["fit"] - x["target"])    # what the trim answers to
     e_pred, e_now = gov["pred"] - gov["target"], worst["fit"] - worst["target"]
 
-    # heat load from the power draw averaged over SMART_LOAD_TAU: the heatsink only feels sustained power
+    # heat load from the power draw averaged over SMART_LOAD_TAU: the heatsink only feels sustained power.
+    # The fans' own draw comes out first, so speeding them up never reads as a bigger load.
     watts = sensors.get("watts")
+    if watts and memory.get("last") is not None:
+        watts = max(watts * 0.5, watts - SMART_FAN_WATTS * (memory["last"] / 100) ** 3)
     if watts and memory.get("watts"):
         memory["watts"] += (watts - memory["watts"]) * min(1, dt / SMART_LOAD_TAU)
     else:

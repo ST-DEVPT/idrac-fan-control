@@ -3,6 +3,7 @@ services:
     image: ghcr.io/st-devpt/rack-fan-control:2   # the major version: fixes and features, never a breaking change
     container_name: fan-control
     restart: unless-stopped
+    stop_grace_period: 60s        # time to hand every fan back to its BMC on `docker stop`
     ports:
       - "8080:8080"
     volumes:

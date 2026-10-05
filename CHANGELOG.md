@@ -3,6 +3,30 @@
 Versions follow [semantic versioning](https://semver.org): a major version (`:2`) never removes a setting
 or changes what an existing one does, so pinning the image to it is safe.
 
+## [2.3.0] - 2026-10-05
+
+Hardware safety: when the controller does not know, the BMC decides.
+
+- **No CPU reading means automatic.** Another sensor (inlet air, a DIMM) no longer stands in for the CPU.
+- **An unreadable BMC gets the fans back** as soon as it takes a command, instead of keeping the last
+  manual speed with nobody watching.
+- **Lost or faulty sensors and failed fans trip the failsafe**, and so does a BMC that ignored a fan
+  command (manual control is tried again after 10 minutes).
+- **The failsafe holds for at least 5 minutes**, and manual control resumes from 50 %, easing down, so
+  fans no longer flap between the BMC and the controller.
+- **Minimum speed is 20 % by default and 10 % at the lowest**; the failsafe goes up to 90 °C. Older
+  settings outside these limits are brought inside them, never refused.
+- **Supermicro**: the fan mode the BMC had (HeavyIO on a GPU box, say) is read once, kept on disk and
+  restored, instead of always Optimal; never below 25 %; X9 is no longer claimed (it needs other commands).
+- **HPE iLO 4 unlocked**: a failed release is now reported instead of silently leaving a low cap.
+- **docker stop releases every server at once** after stopping every loop, and the example compose file
+  allows 60 s. The watchdog no longer waits on a stuck loop's lock.
+- BMC warning thresholds that could not be read are retried every 10 minutes, and the dashboard says so.
+- **Smart mode** takes the fans' own power out of the load signal and carries the learned map at most
+  15 % past its last point. It was re-checked against a harsher simulation: readings every 15 s and 10 s
+  old, fans that stall below 8 %, heat transfer that saturates with airflow, two CPUs sharing air.
+- The control loop is split into read, protect, choose speed, command and report.
+
 ## [2.2.1] - 2026-10-05
 
 Fixes from an independent review of 2.2.0.

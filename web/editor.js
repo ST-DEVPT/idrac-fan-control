@@ -10,7 +10,7 @@ const HOST_HELP = {
 };
 const NOTES = {
   dell: "Enable <b>IPMI over LAN</b> in the iDRAC (iDRAC Settings → Network → IPMI Settings). The user must be an Administrator. iDRAC 9 firmware 3.34.34.34 and later no longer accept fan commands; those servers can be added as monitoring only with the Redfish type.",
-  supermicro: "<b>Experimental.</b> Tested commands for X9, X10 and X11 boards: the BMC is put in Full fan mode and both zones are set. Fans go back to Optimal mode when the controller stops or anything fails.",
+  supermicro: "<b>Experimental.</b> For X10, X11 and X12 boards (X9 uses other commands): the BMC is put in Full fan mode and both zones are set, never below 25 %. When the controller stops or anything fails, the BMC gets back the fan mode it had before.",
   "ilo4-unlocked": "<b>Experimental, and only for unlocked firmware.</b> Requires the community-patched iLO 4 2.77 on a ProLiant Gen8 or Gen9. Stock iLO 4 refuses the commands; add it with the Redfish type instead. Flashing modified firmware is at your own risk.",
   redfish: "Works with HPE iLO 4 (2.30 or later), iLO 5, iLO 6, Lenovo XCC, Dell iDRAC 9 and most recent BMCs. The vendor keeps control of the fans; you get temperatures, fan speeds, power, history, alerts and metrics.",
   ipmi: "Reads every temperature, fan and power sensor the BMC exposes over IPMI. The BMC keeps control of the fans.",
