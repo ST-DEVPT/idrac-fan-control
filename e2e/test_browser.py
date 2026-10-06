@@ -50,14 +50,20 @@ class Browser(unittest.TestCase):
         return page
 
     def tearDown(self):
-        self.assertEqual(getattr(self, "errors", []), [], "the page logged errors")
+        if getattr(self, "errors", []):
+            self.fail("the page logged errors:
+  " + "
+  ".join(self.errors))
 
     def axe(self, page, label):
         page.add_script_tag(url=AXE)
         result = page.evaluate("axe.run(document, {runOnly: ['wcag2a', 'wcag2aa']})")
         serious = [f"{v['id']}: {v['help']} ({len(v['nodes'])}×, e.g. {v['nodes'][0]['target']})"
                    for v in result["violations"] if v["impact"] in ("serious", "critical")]
-        self.assertEqual(serious, [], f"accessibility problems on {label}")
+        if serious:
+            self.fail(f"accessibility problems on {label}:
+  " + "
+  ".join(serious))
 
     # ---- pages
 
@@ -87,7 +93,7 @@ class Browser(unittest.TestCase):
         speed.fill("33")
         speed.dispatch_event("change")
         self.assertEqual(page.evaluate("draft.curve[1][1]"), 33)
-        page.locator('#curve .pt[data-i="1"]').focus()
+        page.evaluate("""document.querySelector('#curve .pt[data-i="1"]').focus()""")
         self.assertEqual(page.evaluate("document.activeElement.getAttribute('data-i')"), "1")
         page.keyboard.press("Shift+ArrowUp")
         self.assertEqual(page.evaluate("draft.curve[1][1]"), 38)
@@ -138,9 +144,9 @@ class Browser(unittest.TestCase):
         page.wait_for_function("document.querySelector('#v-cpu')?.textContent.match(/\\d/)")
         self.assertLess(page.evaluate("document.querySelector('.side').offsetHeight"), 200)
         self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 375)  # nothing sideways
-        small = page.evaluate("""[...document.querySelectorAll('#control-body button')].filter(b => b.offsetParent)
-            .filter(b => b.getBoundingClientRect().height < 39).map(b => b.textContent)""")
-        self.assertEqual(small, [], "touch targets under 40 px")
+        small = page.evaluate("""[...document.querySelectorAll('#control-body button, .actions button')].filter(b => b.offsetParent)
+            .filter(b => b.getBoundingClientRect().height < 39).map(b => b.textContent + ' ' + Math.round(b.getBoundingClientRect().height))""")
+        self.assertEqual(small, [], "touch targets under 40 px")  # names of the buttons that are too small
 
     def test_widget_with_a_token(self):
         page = self.page()

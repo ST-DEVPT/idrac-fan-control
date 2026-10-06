@@ -320,7 +320,7 @@
       <section class="int-step">
         <h2><span class="n">2</span> Add a scrape job</h2>
         <p data-i18n="pm-where">In <code>prometheus.yml</code>. Replace the address if Prometheus reaches this dashboard another way.</p>
-        <div class="code"><pre id="pm-scrape"></pre><button class="copy" data-copy="pm-scrape">Copy</button></div>
+        <div class="code"><pre tabindex="0" id="pm-scrape"></pre><button class="copy" data-copy="pm-scrape">Copy</button></div>
         <p data-i18n="pm-interval" class="hint">The BMCs are read every <span id="pm-interval"></span> s, so scraping more often than that adds nothing.</p>
       </section>
       <section class="int-step">
@@ -343,7 +343,7 @@
   </div>
   <section class="int-live">
     <div class="hd"><h2>Live output</h2><span class="aside"><input id="pm-filter" placeholder="Filter, e.g. cpu" spellcheck="false"> <button class="inline-btn" id="pm-refresh">Refresh</button></span></div>
-    <pre class="metrics-out" id="pm-out">Loading…</pre>
+    <pre tabindex="0" class="metrics-out" id="pm-out">Loading…</pre>
   </section>
 </section>
 
@@ -427,7 +427,7 @@
           <label>Background<select id="hm-bg"><option value="">Transparent</option><option value="solid">Solid</option></select></label>
         </div>
         <div class="share" id="hm-show"></div>
-        <div class="code"><pre id="hm-url"></pre><button class="copy" data-copy="hm-url">Copy</button></div>
+        <div class="code"><pre tabindex="0" id="hm-url"></pre><button class="copy" data-copy="hm-url">Copy</button></div>
         <p class="hint">Put in a widget token from step 1. The dashboard keeps only a hash of it, so it shows a token just once.</p>
         <p data-i18n="hm-iframe">In Homarr, add an <b>iFrame</b> widget and paste the address. Any size works: a short frame drops the chart first, then the footer.</p>
       </section>
@@ -435,7 +435,7 @@
         <h2><span class="n hm-n">5</span> App tile status</h2>
         <p data-i18n="hm-health">For an app tile, use this as its status check. It answers <code>200</code> while every BMC answers, and
           <code>503</code> as soon as one stops.</p>
-        <div class="code"><pre id="hm-health"></pre><button class="copy" data-copy="hm-health">Copy</button></div>
+        <div class="code"><pre tabindex="0" id="hm-health"></pre><button class="copy" data-copy="hm-health">Copy</button></div>
       </section>
     </div>
     <aside class="int-side">
@@ -467,7 +467,7 @@
         <h2><span class="n">2</span> Import</h2>
         <p>Adds the servers that are not here yet, then applies the settings and Discord configuration. Servers
           already here keep their connection details.</p>
-        <p><input type="file" id="bk-file" accept="application/json,.json"></p>
+        <p><input type="file" id="bk-file" accept="application/json,.json" aria-label="Backup file"></p>
         <div class="result" id="bk-preview" hidden></div>
         <p><button class="btn primary" id="bk-import" disabled>Import</button></p>
       </section>

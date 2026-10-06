@@ -615,7 +615,7 @@ body.viewer #channels { pointer-events: none; opacity: .75; }
 /* fingers are not mouse pointers: every control gets a 40 px target on touch screens */
 @media (pointer: coarse) {
   .mini button, .tabs button, .presets button, .inline-btn, .linkish, .side-add, .prof .days button,
-  .side-nav a, .side-servers a, .chips button { min-height: 40px; min-width: 40px; }
+  .side-nav a, .side-servers a, .chips button, .btn { min-height: 40px; min-width: 40px; }
   .mini button, .tabs button { padding-inline: 14px; }
   .num input, .prof input, input[type=time] { min-height: 40px; }
   .seg button { min-height: 44px; }

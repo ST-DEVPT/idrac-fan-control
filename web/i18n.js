@@ -163,6 +163,7 @@ const PT = {
   "Fan Control did not answer. Nothing was saved.": "O Fan Control não respondeu. Nada foi guardado.",
   "Or pick the type yourself:": "Ou escolha o tipo à mão:",
   "Alert rules": "Regras de alerta",
+  "Backup file": "Ficheiro de backup",
   "Not sure? Let the BMC tell you.": "Não tem a certeza? Pergunte ao BMC.", "Detect": "Detetar",
   "Find BMCs on your network.": "Procure BMCs na sua rede.", "Scan network": "Procurar na rede", "Network range to scan": "Gama de rede a procurar",
   "Answers": "Responde a", "Suggested": "Sugestão", "Use": "Usar", "Added": "Adicionado", "Unknown": "Desconhecido",
