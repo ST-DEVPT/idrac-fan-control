@@ -3,7 +3,11 @@ FROM python:3.13-alpine@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf5
 
 # ipmitool: Dell, Supermicro and generic IPMI. openssh-client + sshpass: HPE iLO 4 with unlocked firmware.
 # tzdata: quiet hours follow the TZ variable.
-RUN apk add --no-cache ipmitool openssh-client sshpass tzdata \
+# pip and setuptools only install packages, and Fan Control installs none: they go, with the libraries
+# they bundle (urllib3, msgpack...) and whatever vulnerabilities those carry.
+RUN python -m pip uninstall -y pip setuptools wheel; \
+    rm -rf /usr/local/lib/python3*/ensurepip /root/.cache; \
+    apk add --no-cache ipmitool openssh-client sshpass tzdata \
  && adduser -D -H -u 1000 app \
  && mkdir /data && chown app:app /data
 
