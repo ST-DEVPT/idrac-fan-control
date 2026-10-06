@@ -51,12 +51,15 @@ def main():
         settle(page)
         page.screenshot(path=DOCS / "server.jpg", **JPEG)
 
+        page.set_viewport_size({"width": 1440, "height": 1300})  # the whole panel on screen at once
         body = page.locator("#control-body")
-        body.scroll_into_view_if_needed()
+        body.evaluate("el => el.scrollIntoView({block: 'start'})")
+        page.evaluate("window.scrollBy(0, -24)")
         settle(page, 400)
-        box = body.bounding_box()  # the panel is narrow; the column around it is not
-        page.screenshot(path=DOCS / "control.jpg", full_page=True, **JPEG,
+        box = body.bounding_box()  # viewport coordinates; the panel is narrow, the column around it is not
+        page.screenshot(path=DOCS / "control.jpg", **JPEG,
                         clip={"x": box["x"] - 16, "y": box["y"] - 16, "width": 600, "height": box["height"] + 32})
+        page.set_viewport_size({"width": 1440, "height": 900})
 
         page.goto(URL + "/#/alerts")
         page.wait_for_selector("#v-alerts:not([hidden])")
