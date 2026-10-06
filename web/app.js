@@ -1,19 +1,13 @@
-const $ = s => document.querySelector(s);
-const $$ = s => [...document.querySelectorAll(s)];
+// $, $$, fmt, clamp, esc and api come from util.js
 const T_MIN = 20, T_MAX = 95;
 
 let overview = null;                 // /api/overview: every server, the drivers, the build
 let server = null, draft = null, dirty = false, range = 3600, drag = null;
 let route = { view: "overview" };
 
-const fmt = (v, d = 0) => v == null ? "—" : Number(v).toFixed(d);
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const time = (t, sec) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", ...(sec && { second: "2-digit" }) });
 const unit = (v, u, d = 0) => v == null ? "—" : `${fmt(v, d)}<small>${u}</small>`;
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : "";
-const api = (url, data) => fetch(url, data === undefined ? { cache: "no-store" } :
-  { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
 
 function toast(msg, error) {
   const t = $("#toast");

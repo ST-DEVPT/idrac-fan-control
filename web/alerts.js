@@ -20,7 +20,8 @@ const SAMPLE = {
 const fillIn = (tpl, v) => tpl.replace(/\{(\w+)\}/g, (m, k) => k in v ? String(v[k]) : m);
 
 async function loadAlerts() {
-  const r = await fetch("/api/alerts", { cache: "no-store" });
+  const r = await api("/api/alerts");
+  if (r.status === 401) return location.replace("/login");
   if (!r.ok) return;
   alerts = await r.json();
   aDraft = structuredClone(alerts);
@@ -30,7 +31,7 @@ async function loadAlerts() {
   renderAlerts();
 }
 
-function body() {
+function alertsBody() {
   const keys = ["enabled", "username", "avatar_url", "footer", "details", "mention", "mention_levels",
                 "cooldown_minutes", "hot_threshold", "inlet_threshold", "failsafe_minutes", "report_minutes", "report_mode", "colors", "events"];
   const b = Object.fromEntries(keys.map(k => [k, aDraft[k]]));
@@ -208,11 +209,10 @@ $("#al-reset").onclick = async () => {
 };
 
 // ---------------------------------------------------------------- actions
-const postJSON = (url, data) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
 
 $("#al-save").onclick = async () => {
   $("#al-save").disabled = true;
-  const r = await postJSON("/api/alerts", body());
+  const r = await api("/api/alerts", alertsBody());
   const res = await r.json();
   if (!r.ok) { toast("Could not save: " + res.error, true); $("#al-save").disabled = false; return; }
   alerts = res; aDraft = structuredClone(res); newWebhook = undefined; newSecrets = {}; aDirty = false;
@@ -224,7 +224,7 @@ $("#al-save").onclick = async () => {
 $("#al-discard").onclick = () => loadAlerts();
 $("#al-test").onclick = async () => {
   $("#al-test").disabled = true;
-  const r = await postJSON("/api/test-alert", { kind: aKind, config: body() });
+  const r = await api("/api/test-alert", { kind: aKind, config: alertsBody() });
   toast(r.ok ? `Test "${KIND_NAMES[aKind]}" sent to Discord${aKind === "report" ? " with the current readings" : ""}` : "Test failed: " + (await r.json()).error, !r.ok);
   $("#al-test").disabled = false;
 };
@@ -256,7 +256,7 @@ $("#channels").addEventListener("click", async e => {
   if (!b) return;
   const c = b.closest(".ch").dataset.ch, kind = aKind === "report" ? "failsafe" : aKind;
   b.disabled = true;
-  const r = await postJSON("/api/test-alert", { kind, channel: c, config: body() });
+  const r = await api("/api/test-alert", { kind, channel: c, config: alertsBody() });
   toast(r.ok ? `Test "${KIND_NAMES[kind]}" sent to ${c}` : "Test failed: " + (await r.json()).error, !r.ok);
   b.disabled = false;
 });

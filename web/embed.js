@@ -4,23 +4,21 @@
 // further for this one widget. The layout follows the frame: the chart gives way first, then the
 // footer, so nothing is ever cut in half.
 const params = new URLSearchParams(location.search);
-const $ = id => document.getElementById(id);
-const fmt = v => v == null ? "—" : Math.round(v);
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+// $, fmt and esc come from util.js
 if (["light", "dark"].includes(params.get("theme"))) document.documentElement.dataset.theme = params.get("theme");
 if (params.get("bg") === "solid") document.body.classList.add("solid");
 const show = params.get("show") ? new Set(params.get("show").split(",")) : null;
 
-const api = new URLSearchParams({ server: params.get("server") || "all" });
-if (params.get("token")) api.set("token", params.get("token"));
+const query = new URLSearchParams({ server: params.get("server") || "all" });
+if (params.get("token")) query.set("token", params.get("token"));
 
 async function poll() {
   try {
-    const r = await fetch("/api/widget?" + api, { cache: "no-store" });
+    const r = await api("/api/widget?" + query);
     if (!r.ok) throw new Error(r.status === 401 ? "Add ?token= with EMBED_TOKEN" : r.status === 404 ? "Unknown server" : "Unavailable");
     render(await r.json());
   } catch (e) {
-    $("emb").innerHTML = `<div class="head"><span class="dot bad"></span><b>Fan Control</b><span class="mode">${esc(translate(e.message))}</span></div>`;
+    $("#emb").innerHTML = `<div class="head"><span class="dot bad"></span><b>Fan Control</b><span class="mode">${esc(translate(e.message))}</span></div>`;
   }
 }
 
@@ -34,8 +32,8 @@ function render(w) {
   // the whole rack: one line per server
   const cols = [["cpu", "CPU", s => temp(s.cpu)], ["fans", "Fans", fans], ["power", "Power", s => s.watts == null ? "—" : `${fmt(s.watts)}<small>W</small>`],
     ["inlet", "Inlet", s => temp(s.inlet)]].filter(c => on(w, c[0]));
-  $("emb").className = "emb rack";
-  $("emb").innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${translate(c[1])}</th>`).join("")}</tr></thead><tbody>` +
+  $("#emb").className = "emb rack";
+  $("#emb").innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${translate(c[1])}</th>`).join("")}</tr></thead><tbody>` +
     w.servers.map(s => `<tr><td><span class="${on(w, "status") ? dot(s) : "dot"}"></span><b>${esc(s.name)}</b></td>${cols.map(c => `<td>${c[2](s)}</td>`).join("")}</tr>`).join("") +
     "</tbody></table>";
 }
@@ -44,8 +42,8 @@ function renderOne(w, s) {
   const nums = [["cpu", "CPU", temp(s.cpu)], ["fans", "Fans", fans(s)],
     ["power", "Power", s.watts == null ? "—" : `${fmt(s.watts)}<small>W</small>`]].filter(n => on(w, n[0]));
   const air = [["inlet", "Inlet", s.inlet], ["exhaust", "Exhaust", s.exhaust]].filter(a => on(w, a[0]));
-  $("emb").className = "emb";
-  $("emb").innerHTML = `<div class="head"><span class="${on(w, "status") ? dot(s) : "dot"}"></span><b>${esc(s.name)}</b>
+  $("#emb").className = "emb";
+  $("#emb").innerHTML = `<div class="head"><span class="${on(w, "status") ? dot(s) : "dot"}"></span><b>${esc(s.name)}</b>
       ${on(w, "model") && s.model ? `<span class="model">${esc(s.model)}</span>` : ""}
       ${on(w, "status") ? `<span class="mode">${esc(translate(s.mode))}</span>` : ""}</div>
     ${nums.length ? `<div class="nums">${nums.map(n => `<div class="n"><label>${translate(n[1])}</label><div>${n[2]}</div></div>`).join("")}</div>` : ""}

@@ -20,8 +20,15 @@ jobs:
           python-version: "3.13"
       - name: Python (ruff)
         run: pip install ruff==0.16.10 && ruff check .
-      - name: JavaScript parses
-        run: for f in web/*.js; do node --check "$f"; done
+      - name: JavaScript parses, and the scripts of each page share no name twice
+        run: |
+          for f in web/*.js; do node --check "$f"; done
+          node -e '
+            const fs = require("fs"), pages = {
+              "index.html": ["util", "i18n", "app", "editor", "alerts", "integrations"],
+              "embed.html": ["util", "i18n", "embed"], "login.html": ["util", "i18n", "login"] };
+            for (const [page, files] of Object.entries(pages))
+              new Function(files.map(f => fs.readFileSync(`web/${f}.js`, "utf8")).join(";"));'
       - name: Shell (shellcheck)
         run: shellcheck scripts/fan-guard.sh
       - name: Grafana dashboard is valid JSON

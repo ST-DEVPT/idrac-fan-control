@@ -39,6 +39,7 @@ def same_secret(given, expected):
 STATIC = {  # allowlist: nothing outside it is ever read from disk
     "style.css": "text/css; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
+    "util.js": "text/javascript; charset=utf-8",
     "editor.js": "text/javascript; charset=utf-8",
     "login.js": "text/javascript; charset=utf-8",
     "embed.js": "text/javascript; charset=utf-8",
