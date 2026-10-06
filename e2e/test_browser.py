@@ -92,7 +92,12 @@ class Browser(unittest.TestCase):
         self.assertEqual(page.evaluate("draft.curve[1][1]"), 33)
         page.locator('#curve .pt[data-i="1"]').click()  # a click focuses the point, as a tap or Tab would
         self.assertEqual(page.evaluate("document.activeElement.getAttribute('data-i')"), "1",
-                         page.evaluate("document.activeElement.outerHTML.slice(0, 200)"))
+                         page.evaluate("""(() => { const g = document.querySelector('#curve .pt[data-i="1"]');
+                             const r = g?.getBoundingClientRect(), cs = g && getComputedStyle(g);
+                             return JSON.stringify({exists: !!g, tabIndex: g?.tabIndex, w: r?.width, h: r?.height,
+                               display: cs?.display, visibility: cs?.visibility, hasFocus: document.hasFocus(),
+                               mode: draft?.mode, panel: getComputedStyle(document.querySelector('[data-panel=curve]')).display,
+                               active: document.activeElement.tagName}); })()"""))
         page.keyboard.press("Shift+ArrowUp")
         self.assertEqual(page.evaluate("draft.curve[1][1]"), 38)
         self.assertEqual(page.evaluate("document.activeElement.getAttribute('data-i')"), "1")  # focus stays on the point
