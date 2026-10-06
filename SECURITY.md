@@ -69,6 +69,9 @@ It is not meant to be exposed to the internet.
 - **Diagnostics** downloads leave out passwords, the BMC address (also from events and errors), serial
   numbers and network details.
 - **Backups** with passwords unlock every BMC in them; they are only produced when explicitly asked for.
+- **Supply chain**: no Python dependencies at all; the image is built from a base pinned by digest, without
+  pip or setuptools, and scanned by Trivy in CI (any fixable HIGH or CRITICAL fails the build). Published
+  images carry an SBOM and build provenance. CI actions are pinned by commit; Dependabot proposes updates.
 - **Container**: runs as uid 1000, works with a read-only root filesystem, `cap_drop: [ALL]` and
   `no-new-privileges`.
 - **No third parties**: fonts and assets are bundled, nothing is loaded from elsewhere.

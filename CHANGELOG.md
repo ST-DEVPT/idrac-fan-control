@@ -3,6 +3,31 @@
 Versions follow [semantic versioning](https://semver.org): a major version (`:2`) never removes a setting
 or changes what an existing one does, so pinning the image to it is safe.
 
+## [2.6.0] - 2026-10-06
+
+Engineering, from an independent review: what keeps the other five areas true over time.
+
+- **Browser tests** run against the built image on every push: every page loads without a script error and
+  passes axe (WCAG 2 AA), the curve is edited by field and by keyboard, a change that reduces cooling asks
+  first, invalid values say so, Portuguese is complete on screen, the phone layout fits, a widget token reads
+  widgets and nothing else, a viewer cannot change anything. They found and fixed: curve points losing the
+  keyboard focus on every refresh in current Chromium, faded text under contrast, small buttons on touch
+  screens, an unlabelled file field and scroll areas the keyboard could not reach.
+- **CI**: ruff, a check that each page's scripts never declare a name twice, shellcheck, promtool on the
+  alert rules, tests on Python 3.10 to 3.13, Docker's health check, `docker stop` handing the fans back, and a
+  Trivy scan of the image. Actions are pinned by commit, the base image by digest, both kept current by
+  Dependabot; images carry an SBOM and provenance; a tag without its CHANGELOG section is refused.
+- **The image has no pip or setuptools** (the app installs nothing), and with them went the four HIGH
+  vulnerabilities of the libraries they bundle.
+- **Routes declare their access** (public, widget, viewer, admin) and one dispatcher checks it; a test walks
+  the table. No route can be open because of where it sits.
+- **Logging** through the standard library, with ISO-8601 times; `LOG_FORMAT=json` for log collectors.
+- **Metrics**: counters for BMC errors, fan commands, refused commands, failsafe trips and alerts, the
+  control loop's last tick, failed fans; and a file of Prometheus alert rules.
+- **Backups** include what smart mode learned. Tests load data files as 1.x and 2.0 wrote them.
+- `fan-guard.sh` is shellcheck-clean and tested in the suite. One shared `util.js` for every page.
+- Quiet hours from a time to the same time now mean the whole day, as schedule profiles already did.
+
 ## [2.5.0] - 2026-10-05
 
 The dashboard, for people who are not engineers and for phones, from an independent review.

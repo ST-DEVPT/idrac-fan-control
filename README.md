@@ -112,6 +112,7 @@ Servers, fan settings and Discord are configured in the dashboard. The environme
 | `DISCORD_WEBHOOK_URL` | empty | Default Discord webhook. A webhook pasted in the dashboard takes precedence |
 | `METRICS_TOKEN` | empty | A metrics token for `/metrics` (`Authorization: Bearer <token>`). Tokens can also be created on the Prometheus page |
 | `EMBED_TOKEN` | empty | A widget token for `/embed?token=` and `/api/widget`. Tokens can also be created on the Homarr page |
+| `LOG_FORMAT` | text | `json` prints one JSON object per log line (time, level, logger, server, message) for Loki, Graylog and the like |
 | `UPDATE_CHECK` | `true` | Asks GitHub twice a day for the latest release, and shows it in the sidebar when it is newer. `false` turns it off |
 | `TRUST_PROXY` | off | Set to `true` behind a reverse proxy, so sign-in limits and the event log use `X-Forwarded-For` |
 | `TRUSTED_PROXIES` | loopback and Docker networks | Addresses or networks (comma separated) whose `X-Forwarded-For` is believed, e.g. `192.168.1.10` for a proxy on another machine |
@@ -326,6 +327,12 @@ scrape_configs:
 | `fanctl_temperature_celsius` | ... `sensor`, `entity` |
 | `fanctl_fan_rpm`, `fanctl_fan_percent` | ... `fan` |
 
+**Alert rules**: [`web/prometheus-alerts.yml`](web/prometheus-alerts.yml), also on the Prometheus page, covers
+Fan Control itself being down, a stalled control loop, an unreachable BMC, a lasting failsafe, a failed fan, a
+hot CPU and refused fan commands. Counters (`fanctl_bmc_errors_total`, `fanctl_fan_commands_total`,
+`fanctl_fan_commands_refused_total`, `fanctl_failsafe_trips_total`, `fanctl_alerts_sent_total`) and
+`fanctl_loop_last_tick_timestamp_seconds` are there for rules of your own.
+
 **Grafana**: download the dashboard from the Grafana page (or `web/grafana.json`), then
 Dashboards → New → Import, and pick your Prometheus data source.
 
@@ -413,8 +420,17 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ```bash
 python app.py                   # dashboard on http://localhost:8080; add a "Demo server" to try it
-python -m unittest              # tests: drivers, control logic, smart mode, server registry, alerts, HTTP
+python -m unittest              # unit tests: drivers, control, smart mode, safety, alerts, HTTP, i18n, upgrades
+ruff check .                    # lint, configured in pyproject.toml
+FANCTL_URL=http://localhost:8080 FANCTL_PASSWORD=... python -m unittest discover -s e2e   # browser tests (Playwright)
 ```
+
+CI runs all of it on every push: ruff, `node --check` and a duplicate-name check across each page's scripts,
+shellcheck, promtool on the alert rules, the unit tests on Python 3.10 to 3.13, then the image itself: its
+health check, the browser tests (every page, WCAG 2 AA with axe, keyboard and touch layouts, Portuguese),
+`docker stop` handing the fans back, and a Trivy scan that fails on any fixable HIGH or CRITICAL
+vulnerability. Published images carry an SBOM and build provenance; actions are pinned by commit and the base
+image by digest, kept current by Dependabot.
 
 Python 3.10 or newer, no dependencies. The code is in `fanctl/`: `drivers.py` (how each kind of BMC is read
 and driven), `control.py` (decisions and smart mode, no I/O), `server.py` (control loop and server registry),
