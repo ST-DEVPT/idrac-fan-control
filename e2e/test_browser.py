@@ -33,7 +33,9 @@ class Browser(unittest.TestCase):
         cls.pw.stop()
 
     def page(self, lang="en", **context):
-        ctx = self.browser.new_context(**context)
+        # the app's CSP (script-src 'self') would also stop the test's own scripts: axe, and the
+        # expressions Playwright evaluates. The tests bypass it; the app keeps it.
+        ctx = self.browser.new_context(bypass_csp=True, **context)
         self.addCleanup(ctx.close)
         page = ctx.new_page()
         self.errors = []
@@ -85,10 +87,11 @@ class Browser(unittest.TestCase):
         speed.fill("33")
         speed.dispatch_event("change")
         self.assertEqual(page.evaluate("draft.curve[1][1]"), 33)
-        page.focus('#curve .pt[data-i="1"]')
+        page.locator('#curve .pt[data-i="1"]').focus()
+        self.assertEqual(page.evaluate("document.activeElement.getAttribute('data-i')"), "1")
         page.keyboard.press("Shift+ArrowUp")
         self.assertEqual(page.evaluate("draft.curve[1][1]"), 38)
-        self.assertEqual(page.evaluate("document.activeElement.dataset.i"), "1")  # focus stays on the point
+        self.assertEqual(page.evaluate("document.activeElement.getAttribute('data-i')"), "1")  # focus stays on the point
         page.click("#save")
         page.wait_for_selector(".toast.show")
         page.reload()
@@ -144,7 +147,7 @@ class Browser(unittest.TestCase):
         token = page.evaluate("""fetch('/api/tokens', {method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({name: 'e2e', kind: 'widget'})}).then(r => r.json())""")
         try:
-            anon = self.browser.new_context()
+            anon = self.browser.new_context(bypass_csp=True)
             self.addCleanup(anon.close)
             w = anon.new_page()
             w.goto(f"{URL}/embed?server={SERVER}&token={token['token']}")
@@ -159,7 +162,7 @@ class Browser(unittest.TestCase):
 
     @unittest.skipUnless(VIEWER, "needs FANCTL_VIEWER")
     def test_viewer_cannot_change_anything(self):
-        ctx = self.browser.new_context()
+        ctx = self.browser.new_context(bypass_csp=True)
         self.addCleanup(ctx.close)
         page = ctx.new_page()
         page.goto(URL + "/login")
