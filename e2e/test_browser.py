@@ -84,7 +84,7 @@ class Browser(unittest.TestCase):
     def test_curve_point_edited_by_field_and_keyboard(self):
         page = self.page()
         page.goto(f"{URL}/#/server/{SERVER}")
-        page.wait_for_function("document.querySelector('#v-cpu')?.textContent.match(/\d/)")
+        page.wait_for_function("document.querySelector('#v-cpu')?.textContent.match(/\\d/)")
         page.click('.seg button[data-mode="curve"]')
         speed = page.locator('#curve-points .cp input[data-k="1"]').nth(1)
         speed.fill("33")
