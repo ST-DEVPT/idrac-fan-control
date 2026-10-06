@@ -565,11 +565,15 @@ function renderCurve() {
   draft.curve.forEach((p, i) => g += `<g class="pt" data-i="${i}" tabindex="0" role="slider" aria-valuenow="${p[1]}"
       aria-valuetext="${fmt(tv(p[0]))} ${tu()}, ${p[1]} %" aria-label="${translate("Curve point")} ${i + 1}">
       <circle cx="${cx(p[0])}" cy="${cy(p[1])}" r="13" fill="transparent"/><circle cx="${cx(p[0])}" cy="${cy(p[1])}" r="4.5"/></g>`);
-  // the panel redraws every 5 s: a point that has the keyboard focus keeps it
+  // The panel redraws every 5 s: a point that has the keyboard focus keeps it. Which one is decided
+  // before the redraw, since current browsers fire focusout while innerHTML removes the old point.
   const active = document.activeElement?.closest?.("#curve .pt");
-  if (active) focusPoint = +active.dataset.i;
+  const keep = focusPoint ?? (active ? +active.dataset.i : null);
   $("#curve").innerHTML = g;
-  if (focusPoint != null && (active || document.activeElement === document.body)) $(`#curve .pt[data-i="${focusPoint}"]`)?.focus();
+  if (keep != null && (active || document.activeElement === document.body)) {
+    focusPoint = keep;
+    $(`#curve .pt[data-i="${keep}"]`)?.focus();
+  }
   renderCurvePoints();
 }
 
