@@ -30,6 +30,7 @@ if [ -f "$ENV_FILE" ]; then
     echo "$(date '+%F %T') fan-guard: $ENV_FILE is writable by others; fix with chmod 600 $ENV_FILE" >&2
     exit 1
   fi
+  # shellcheck source=/dev/null
   set -a; . "$ENV_FILE"; set +a
 fi
 
@@ -57,22 +58,23 @@ failures=$(( $(cat "$STATE" 2>/dev/null || echo 0) + 1 ))
 echo "$failures" > "$STATE"
 [ "$failures" -lt 2 ] && exit 0
 
-hand_back() {  # host user password driver
-  [ -n "$1" ] || return 0
+send_auto() {  # host user password driver: the BMC's own fan control back, by the way each vendor takes it
   case "${4:-dell}" in
-    dell)         IPMI_PASSWORD="$3" ipmitool -I lanplus -H "$1" -U "$2" -E raw 0x30 0x30 0x01 0x01 >/dev/null 2>&1 ;;
-    supermicro)   IPMI_PASSWORD="$3" ipmitool -I lanplus -H "$1" -U "$2" -E raw 0x30 0x45 0x01 "${SUPERMICRO_MODE:-0x02}" >/dev/null 2>&1 ;;
+    dell)       IPMI_PASSWORD="$3" ipmitool -I lanplus -H "$1" -U "$2" -E raw 0x30 0x30 0x01 0x01 >/dev/null 2>&1 ;;
+    supermicro) IPMI_PASSWORD="$3" ipmitool -I lanplus -H "$1" -U "$2" -E raw 0x30 0x45 0x01 "${SUPERMICRO_MODE:-0x02}" >/dev/null 2>&1 ;;
     ilo4-unlocked)
-      ok=0
+      ok=1
       for n in 0 1 2 3 4 5 6 7; do
-        SSHPASS="$3" sshpass -e ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
-          -o KexAlgorithms=+diffie-hellman-group14-sha1,diffie-hellman-group1-sha1 -o HostKeyAlgorithms=+ssh-rsa \
-          -l "$2" "$1" "fan p $n max 255" >/dev/null 2>&1 && ok=1
+        SSHPASS="$3" sshpass -e ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new           -o KexAlgorithms=+diffie-hellman-group14-sha1,diffie-hellman-group1-sha1 -o HostKeyAlgorithms=+ssh-rsa           -l "$2" "$1" "fan p $n max 255" >/dev/null 2>&1 && ok=0
       done
-      [ "$ok" = 1 ] ;;
+      return $ok ;;
     *) log "unknown driver '$4' for $1"; return 1 ;;
   esac
-  if [ $? -eq 0 ]; then
+}
+
+hand_back() {  # host user password driver
+  [ -n "$1" ] || return 0
+  if send_auto "$@"; then
     log "container ${CONTAINER:-?} is '$status', fans of $1 handed back to the BMC"
   else
     log "container ${CONTAINER:-?} is '$status', and $1 refused the command" >&2
