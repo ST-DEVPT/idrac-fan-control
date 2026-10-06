@@ -1,9 +1,13 @@
 name: Screenshots
 
 # Regenerates the README's screenshots and the social preview from the real image, with three demo
-# servers. Run it from the Actions tab; the images come back as an artifact to commit.
+# servers, on every release, on docs/* branches, or from the Actions tab; the images come back as an
+# artifact to commit.
 on:
   workflow_dispatch:
+  push:
+    branches: ["docs/**"]
+    tags: ["v*"]
 
 permissions:
   contents: read
