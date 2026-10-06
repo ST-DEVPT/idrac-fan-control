@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fan Control social preview</title>
+<style>
+  @font-face { font-family: "Archivo"; src: url(../../web/fonts/archivo.woff2) format("woff2"); font-weight: 300 800; font-stretch: 62% 125%; }
+  @font-face { font-family: "Plex"; src: url(../../web/fonts/plex-mono-400.woff2) format("woff2"); }
+  html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; background: #111110; color: #ebe9e4; }
+  body { font-family: "Archivo", sans-serif; display: grid; grid-template-columns: 500px 1fr; }
+  .text { padding: 72px 0 60px 72px; display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 16px; font-size: 30px; font-weight: 650; }
+  .brand img { width: 52px; height: 52px; }
+  h1 { font-size: 64px; line-height: 1.02; font-weight: 600; font-stretch: 82%; margin: 56px 0 0; letter-spacing: -.01em; }
+  h1 em { font-style: normal; color: #ff6a33; }
+  p { font-size: 22px; line-height: 1.45; color: #aaa79f; margin: 26px 0 0; max-width: 400px; }
+  .vendors { margin-top: auto; font: 15px "Plex", monospace; color: #8f8c84; letter-spacing: .02em; }
+  .shot { position: relative; }
+  .shot img { position: absolute; left: 0; top: 64px; width: 1000px; border-radius: 12px 0 0 12px;
+              border: 1px solid #3a3834; border-right: 0; box-shadow: 0 30px 80px #000c; }
+</style>
+</head>
+<body>
+  <div class="text">
+    <div class="brand"><img src="../../web/icon.svg" alt="">Fan Control</div>
+    <h1>Quiet rack servers, <em>without cooking them.</em></h1>
+    <p>Self-hosted fan control with a smart mode that learns your server, and the BMC as the safety net.</p>
+    <div class="vendors">DELL iDRAC · SUPERMICRO · HPE iLO · REDFISH · IPMI</div>
+  </div>
+  <div class="shot"><img src="../overview.jpg" alt=""></div>
+</body>
+</html>

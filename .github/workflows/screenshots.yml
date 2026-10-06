@@ -1,0 +1,37 @@
+name: Screenshots
+
+# Regenerates the README's screenshots and the social preview from the real image, with three demo
+# servers. Run it from the Actions tab; the images come back as an artifact to commit.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - run: docker build -t fanctl:shots .
+      - name: Start with three demo servers
+        run: |
+          mkdir data && sudo chown 1000:1000 data
+          docker run -d --name fanctl -p 8080:8080 -v "$PWD/data:/data" -e WEB_PASSWORD=shots -e CHECK_INTERVAL=5 \
+            -e SERVER_1_HOST=demo -e SERVER_1_NAME=R720 -e SERVER_2_HOST=demo -e SERVER_2_NAME=R420 \
+            -e SERVER_3_HOST=demo -e SERVER_3_NAME=R620 fanctl:shots
+          for i in $(seq 30); do curl -fs localhost:8080/livez && break; sleep 1; done
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+        with:
+          python-version: "3.13"
+      - name: Take them
+        run: |
+          pip install playwright==1.63.0
+          python -m playwright install --with-deps chromium
+          FANCTL_URL=http://localhost:8080 FANCTL_PASSWORD=shots python e2e/screenshots.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: screenshots
+          path: |
+            docs/*.jpg
+            docs/social-preview.png
