@@ -90,7 +90,8 @@ class Browser(unittest.TestCase):
         speed.dispatch_event("change")
         self.assertEqual(page.evaluate("draft.curve[1][1]"), 33)
         page.evaluate("""document.querySelector('#curve .pt[data-i="1"]').focus()""")
-        self.assertEqual(page.evaluate("document.activeElement.getAttribute('data-i')"), "1")
+        self.assertEqual(page.evaluate("document.activeElement.getAttribute('data-i')"), "1",
+                         page.evaluate("document.activeElement.outerHTML.slice(0, 200)"))
         page.keyboard.press("Shift+ArrowUp")
         self.assertEqual(page.evaluate("draft.curve[1][1]"), 38)
         self.assertEqual(page.evaluate("document.activeElement.getAttribute('data-i')"), "1")  # focus stays on the point

@@ -525,7 +525,7 @@ a.btn.primary { color: var(--bg); }
 /* quiet hours */
 .quiet { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .quiet-fields { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
-.quiet-fields.off { opacity: .4; }
+.quiet-fields.off input:disabled { color: var(--ink-3); background: transparent; }
 .quiet-fields input[type=time] { padding: 4px 6px; border: 1px solid var(--rule-2); border-radius: 5px; background: var(--surface); color: var(--ink); font: 13px var(--sans); }
 .quiet-fields .num input { width: 54px; }
 .quiet-row { flex-wrap: wrap; }
@@ -589,7 +589,7 @@ body.viewer #hm-fields { pointer-events: none; opacity: .6; }
 .channels { margin-top: 18px; }
 .ch-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .ch { border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; display: grid; gap: 10px; align-content: start; background: var(--surface); }
-.ch.off .fld, .ch.off .hint { opacity: .55; }
+.ch.off { border-style: dashed; }  /* off, but every word still readable */
 .channels > .hd h2 { display: block; margin: 0 12px 0 0; font-size: 15px; }
 .ch .switch { margin-left: 0; }
 .ch .fld input { width: 100%; box-sizing: border-box; }

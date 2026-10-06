@@ -344,6 +344,7 @@ function renderControls() {
   $$("#dry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.dry === String(draft.dry_run)));
   $$("#quiet-on button").forEach(b => b.setAttribute("aria-pressed", b.dataset.quiet === String(draft.quiet.enabled)));
   $("#quiet-fields").classList.toggle("off", !draft.quiet.enabled);
+  for (const sel of ["#quiet-start", "#quiet-end", "#quiet-max"]) $(sel).disabled = !draft.quiet.enabled;
   for (const [sel, key] of [["#quiet-start", "start"], ["#quiet-end", "end"], ["#quiet-max", "max_speed"]])
     if (document.activeElement !== $(sel)) $(sel).value = draft.quiet[key];
   $$("[data-pcie]").forEach(b => b.setAttribute("aria-pressed", b.dataset.pcie === String(draft.pcie_cooling)));
