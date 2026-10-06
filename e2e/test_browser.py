@@ -84,12 +84,13 @@ class Browser(unittest.TestCase):
     def test_curve_point_edited_by_field_and_keyboard(self):
         page = self.page()
         page.goto(f"{URL}/#/server/{SERVER}")
+        page.wait_for_function("document.querySelector('#v-cpu')?.textContent.match(/\d/)")
         page.click('.seg button[data-mode="curve"]')
         speed = page.locator('#curve-points .cp input[data-k="1"]').nth(1)
         speed.fill("33")
         speed.dispatch_event("change")
         self.assertEqual(page.evaluate("draft.curve[1][1]"), 33)
-        page.evaluate("""document.querySelector('#curve .pt[data-i="1"]').focus()""")
+        page.locator('#curve .pt[data-i="1"]').click()  # a click focuses the point, as a tap or Tab would
         self.assertEqual(page.evaluate("document.activeElement.getAttribute('data-i')"), "1",
                          page.evaluate("document.activeElement.outerHTML.slice(0, 200)"))
         page.keyboard.press("Shift+ArrowUp")
