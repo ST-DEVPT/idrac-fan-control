@@ -34,7 +34,7 @@ def curve_speed(curve, temp):
     pts = sorted(curve)
     if temp <= pts[0][0]:
         return pts[0][1]
-    for (t0, s0), (t1, s1) in zip(pts, pts[1:]):
+    for (t0, s0), (t1, s1) in zip(pts, pts[1:], strict=False):
         if temp <= t1:
             return round(s0 + (s1 - s0) * (temp - t0) / (t1 - t0)) if t1 > t0 else s1
     return pts[-1][1]
@@ -319,7 +319,7 @@ def map_speed(learned, load):
         pts.append((SMART_BIN ** b, top))
     if load <= pts[0][0]:
         return pts[0][1]
-    for (x0, v0), (x1, v1) in zip(pts, pts[1:]):
+    for (x0, v0), (x1, v1) in zip(pts, pts[1:], strict=False):
         if load <= x1:
             return v0 + (v1 - v0) * (load - x0) / (x1 - x0)
     (x0, v0), (x1, v1) = pts[0], pts[-1]

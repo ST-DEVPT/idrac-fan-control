@@ -5,7 +5,6 @@ import logging
 import os
 import random
 import re
-import sys
 import threading
 import time
 from collections import deque

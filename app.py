@@ -103,7 +103,8 @@ def main():
     threading.Thread(target=watchdog, daemon=True, name="watchdog").start()
     threading.Thread(target=updates.loop, daemon=True, name="updates").start()
     log.info("Fan Control %s listening on :%s for %d server(s)", config.VERSION, config.PORT, len(SERVERS))
-    BoundedServer(("0.0.0.0", config.PORT), web.Handler).serve_forever()
+    # every interface inside the container; what reaches it is decided by the published port
+    BoundedServer(("0.0.0.0", config.PORT), web.Handler).serve_forever()  # noqa: S104
 
 
 if __name__ == "__main__":

@@ -407,7 +407,8 @@ class CertificateChanged(Exception):
 
 class PinnedHTTPSHandler(urllib.request.HTTPSHandler):
     def __init__(self, data_dir, host):
-        super().__init__(context=ssl._create_unverified_context())  # self-signed: identity comes from the pin
+        # self-signed certificates: the identity comes from the pin checked in https_open, not from a CA
+        super().__init__(context=ssl._create_unverified_context())  # noqa: S323
         self.data_dir, self.host = data_dir, bare_host(host)
 
     def check(self, der):
@@ -458,7 +459,8 @@ class RedfishDriver(Driver):
         elif self.pin:
             https = PinnedHTTPSHandler(self.data_dir, self.host)
         else:
-            https = urllib.request.HTTPSHandler(context=ssl._create_unverified_context())  # self-signed
+            # scans and connection tests: self-signed, no pin yet, and no password goes to a scan
+            https = urllib.request.HTTPSHandler(context=ssl._create_unverified_context())  # noqa: S323
         token = base64.b64encode(f"{self.username}:{self.password}".encode()).decode()
         host = f"[{self.host}]" if self.host.count(":") > 1 and not self.host.startswith("[") else self.host
         req = urllib.request.Request(f"https://{host}{path}", headers={

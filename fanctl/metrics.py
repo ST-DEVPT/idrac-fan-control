@@ -14,7 +14,7 @@ def metrics(servers):
         if value is None:
             return
         rows = out.setdefault(name, [f"# HELP {name} {help_}", f"# TYPE {name} {kind}"])
-        lab = ",".join('%s="%s"' % (k, esc(v)) for k, v in labels.items())
+        lab = ",".join(f'{k}="{esc(v)}"' for k, v in labels.items())
         rows.append(f"{name}{{{lab}}} {value:.15g}")
 
     add("fanctl_info", "Build information.", {"version": VERSION}, 1)

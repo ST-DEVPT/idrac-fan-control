@@ -5,8 +5,6 @@ import hmac
 import json
 import logging
 import re
-import secrets
-import threading
 import time
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlsplit
@@ -571,7 +569,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def file(self, rel, ctype, frame=False):
         body = (WEB / rel).read_bytes()
-        etag = '"' + hashlib.sha1(body).hexdigest()[:16] + '"'
+        etag = '"' + hashlib.sha1(body, usedforsecurity=False).hexdigest()[:16] + '"'
         cache = [("Cache-Control", "no-cache"), ("ETag", etag)]
         if self.headers.get("If-None-Match") == etag:
             return self.send(304, headers=cache, frame=frame)
