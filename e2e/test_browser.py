@@ -51,9 +51,7 @@ class Browser(unittest.TestCase):
 
     def tearDown(self):
         if getattr(self, "errors", []):
-            self.fail("the page logged errors:
-  " + "
-  ".join(self.errors))
+            self.fail("the page logged errors:" + "".join("\n  " + e for e in self.errors))
 
     def axe(self, page, label):
         page.add_script_tag(url=AXE)
@@ -61,9 +59,7 @@ class Browser(unittest.TestCase):
         serious = [f"{v['id']}: {v['help']} ({len(v['nodes'])}×, e.g. {v['nodes'][0]['target']})"
                    for v in result["violations"] if v["impact"] in ("serious", "critical")]
         if serious:
-            self.fail(f"accessibility problems on {label}:
-  " + "
-  ".join(serious))
+            self.fail(f"accessibility problems on {label}:" + "".join("\n  " + v for v in serious))
 
     # ---- pages
 
