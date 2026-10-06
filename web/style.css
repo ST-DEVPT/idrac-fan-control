@@ -451,6 +451,10 @@ a.btn.primary { color: var(--bg); }
   .side-servers { order: 3; width: 100%; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
   .side-servers a { flex-shrink: 0; white-space: nowrap; }
   .side-foot { margin: 0 0 0 auto; padding: 0; border: 0; order: 1; gap: 6px; }
+  .side::after { content: ""; order: 2; flex-basis: 100%; height: 0; }  /* pages always start the second row */
+  .side-nav { order: 3; }
+  .side-settings { order: 3; }
+  .side-servers { order: 4; }
   .brand { order: 0; }
   .main { padding: 20px 16px 48px; }
   .page-head h1 { font-size: 32px; }

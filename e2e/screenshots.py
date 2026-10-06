@@ -44,16 +44,19 @@ def main():
 
         page.goto(URL + "/#/")
         settle(page)
-        page.screenshot(path=DOCS / "overview.jpg", **JPEG)
+        page.screenshot(path=DOCS / "overview.jpg", clip={"x": 0, "y": 0, "width": 1440, "height": 660}, **JPEG)
 
         page.goto(URL + "/#/server/r420")
         page.wait_for_function("document.querySelector('#v-cpu')?.textContent.match(/\\d/)")
         settle(page)
         page.screenshot(path=DOCS / "server.jpg", **JPEG)
 
-        page.locator("#control-body").scroll_into_view_if_needed()
+        body = page.locator("#control-body")
+        body.scroll_into_view_if_needed()
         settle(page, 400)
-        page.locator("#control-body").screenshot(path=DOCS / "control.jpg", **JPEG)
+        box = body.bounding_box()  # the panel is narrow; the column around it is not
+        page.screenshot(path=DOCS / "control.jpg", full_page=True, **JPEG,
+                        clip={"x": box["x"] - 16, "y": box["y"] - 16, "width": 600, "height": box["height"] + 32})
 
         page.goto(URL + "/#/alerts")
         page.wait_for_selector("#v-alerts:not([hidden])")

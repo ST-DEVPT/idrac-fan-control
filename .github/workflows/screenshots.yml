@@ -17,7 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-      - run: docker build -t fanctl:shots .
+        with:
+          fetch-depth: 0  # the tags, for the version shown in the sidebar
+      - run: docker build --build-arg VERSION="$(git describe --tags --abbrev=0 | sed 's/^v//')" -t fanctl:shots .
       - name: Start with three demo servers
         run: |
           mkdir data && sudo chown 1000:1000 data
