@@ -1,0 +1,35 @@
+name: Hardware report
+description: A server that is not supported, or supported but behaving differently
+labels: [hardware]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        New vendors and models are added from real reports. Add the server as **Other server (IPMI)** or
+        **Redfish** (monitoring only, nothing is changed on it), then download **Diagnostics** from its page.
+  - type: input
+    id: model
+    attributes:
+      label: Server model
+      placeholder: e.g. Supermicro X9DRi-LN4F+, HPE ProLiant DL380 Gen10
+    validations:
+      required: true
+  - type: input
+    id: bmc
+    attributes:
+      label: BMC and firmware
+      placeholder: e.g. iLO 5 2.72, iDRAC 9 4.40.00.00
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics file
+      description: From the server's page, with the server added as monitoring only.
+    validations:
+      required: true
+  - type: textarea
+    id: commands
+    attributes:
+      label: Fan commands you know work
+      description: If you control the fans of this server another way today (a script, a tool), how? Model and firmware matter.

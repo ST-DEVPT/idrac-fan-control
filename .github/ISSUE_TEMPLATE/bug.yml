@@ -1,0 +1,40 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. If the problem is with a server, the **Diagnostics** file from its page is
+        the most useful thing you can attach: it holds what the BMC answers, without passwords, addresses or
+        serial numbers.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Fan Control version
+      description: Bottom left of the dashboard, e.g. v2.6.0
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Server and BMC
+      description: Model and BMC firmware, e.g. PowerEdge R420, iDRAC 7 2.65.65.65
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics file
+      description: Drag the file from the server's page (Diagnostics button) here.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Container logs
+      description: The last lines of `docker logs <container>`, if they show anything related.
+      render: text

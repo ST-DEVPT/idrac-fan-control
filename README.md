@@ -1,35 +1,73 @@
-# Fan Control
+<p align="center">
+  <img src="web/icon.svg" width="76" height="76" alt="">
+</p>
 
-**Quiet rack servers, without cooking them.** A self-hosted dashboard for Dell PowerEdge, Supermicro,
-HPE ProLiant and any Redfish or IPMI server. It takes over fan control where the vendor allows it, holds
-the temperatures you choose, hands control back to the BMC the moment anything looks wrong, and watches
-everything else.
+<h1 align="center">Fan Control</h1>
 
-[![CI](https://github.com/ST-DEVPT/rack-fan-control/actions/workflows/docker.yml/badge.svg)](https://github.com/ST-DEVPT/rack-fan-control/actions/workflows/docker.yml)
-[![Release](https://img.shields.io/github/v/release/ST-DEVPT/rack-fan-control)](https://github.com/ST-DEVPT/rack-fan-control/releases)
-[![Image](https://img.shields.io/badge/image-ghcr.io-blue)](https://github.com/ST-DEVPT/rack-fan-control/pkgs/container/rack-fan-control)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+<p align="center">
+  <b>Quiet rack servers, without cooking them.</b><br>
+  Self-hosted fan control for Dell PowerEdge, Supermicro and HPE ProLiant, with a smart mode that learns
+  your server, and the BMC as the safety net.
+</p>
 
-<img alt="Overview: two servers under fan control and an HPE server that cannot be reached" src="docs/overview.jpg">
+<p align="center">
+  <a href="https://github.com/ST-DEVPT/rack-fan-control/actions/workflows/docker.yml"><img alt="CI" src="https://github.com/ST-DEVPT/rack-fan-control/actions/workflows/docker.yml/badge.svg"></a>
+  <a href="https://github.com/ST-DEVPT/rack-fan-control/releases"><img alt="Release" src="https://img.shields.io/github/v/release/ST-DEVPT/rack-fan-control?color=e4501b"></a>
+  <a href="https://github.com/ST-DEVPT/rack-fan-control/pkgs/container/rack-fan-control"><img alt="Image" src="https://img.shields.io/badge/ghcr.io-amd64%20%7C%20arm64-2c6b8a"></a>
+  <img alt="Python" src="https://img.shields.io/badge/python-3.10%E2%80%933.13-3b7a39">
+  <img alt="Dependencies" src="https://img.shields.io/badge/dependencies-none-3b7a39">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-4f4d48"></a>
+</p>
 
-<img alt="A server's page: live readings and history" src="docs/server.jpg">
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#supported-hardware">Hardware</a> ·
+  <a href="#fan-control">How it works</a> ·
+  <a href="#protection">Safety</a> ·
+  <a href="#integrations">Integrations</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-## Highlights
+<p align="center">
+  <img alt="The overview: three servers, each in its own fan mode" src="docs/overview.jpg">
+</p>
 
-- **Every server in one place**: an overview of the rack and a page per server. Scan your network for BMCs,
-  let each one tell its vendor and firmware, test the connection, add it.
-- **Smart mode**: holds the CPU at a target with as little fan as it can. It learns the speed each load
-  needs on your server, sees heat coming before it arrives and rides out short bursts. Or draw a curve, or
-  pick a fixed speed.
-- **Safe by design**: the BMC takes over on a CPU failsafe, on hot exhaust air, when any sensor nears the
-  warning level its BMC defines, on missing readings, refused commands, crashes and `docker stop`.
-  A minimum speed and a dry-run mode for trying things out.
-- **Quiet hours**, ramp-down smoothing, curve presets, and 3 h / 24 h / 7 d history that survives restarts.
-- **Discord** alerts you can fully customise, and a status card that keeps itself up to date.
-- **Prometheus**, a ready-made **Grafana** dashboard, and **Homarr** widgets (a native Homarr 2.0 widget and
-  an iFrame for any dashboard) that show only what you choose, each with its own setup page.
-- **Read-only accounts**, backups, English or Portuguese, °C or °F.
-- **Small and private**: plain Python, no dependencies, no third-party requests, runs as non-root.
+## Why
+
+Rack servers are made for datacenters, where nobody minds the noise. In a homelab the factory fan profile
+runs loud, and the usual fix, an `ipmitool` script in cron that pins the fans low, has a flaw: when the
+script dies, the fans stay low and nobody is watching the temperature.
+
+Fan Control takes over the fans only while it is sure it should. It reads every sensor the BMC has, holds the
+temperature you choose with as little fan as possible, and hands the fans back to the BMC the moment anything
+is unknown: a missing reading, a sensor that disappears, a failed fan, a command the BMC ignores, a crash or
+a container stop. A watchdog restarts it if it stalls, and a small script on the host covers it being killed.
+
+## At a glance
+
+<table>
+  <tr>
+    <td width="58%"><img alt="A server's page: live readings and three hours of history" src="docs/server.jpg"></td>
+    <td><img alt="The control panel: fan curve, failsafe, minimum speed and quiet hours" src="docs/control.jpg"></td>
+  </tr>
+  <tr>
+    <td><img alt="Alerts on Discord, ntfy, Gotify or any webhook, with a live preview" src="docs/alerts.jpg"></td>
+    <td align="center"><img alt="The server page on a phone" src="docs/phone.jpg" width="230">&nbsp;&nbsp;<img alt="The Homarr widget" src="docs/embed.jpg" width="300"></td>
+  </tr>
+</table>
+
+- **Four ways to drive the fans**: automatic (the BMC), fixed, a curve you drag, or **smart**, which learns the
+  speed each load needs on your server, sees heat coming before it arrives and rides out short bursts.
+- **Protection first**: a CPU failsafe, an exhaust air limit, every sensor's own BMC warning level, a minimum
+  speed, a dry run to try things out. The BMC takes over whenever anything is wrong or unknown.
+- **Every server in one place**: scan your network for BMCs, let each say what it is, test it, add it.
+  Monitoring-only servers (any Redfish or IPMI BMC) get the same history, alerts and metrics.
+- **Quiet hours and schedules**: cap the fans at night, or by day and hour, without giving up protection.
+- **Alerts** on Discord, ntfy, Gotify or any webhook: failsafe, failed fan, ignored commands, a hot room.
+- **Prometheus metrics**, a **Grafana** dashboard, alert rules, and **Homarr** widgets that share only what
+  you choose.
+- **Made to be left alone**: plain Python with no dependencies, a non-root read-only container, read-only
+  accounts, revocable sessions and tokens, backups, English and Portuguese, °C and °F.
 
 ## Contents
 
@@ -39,11 +77,13 @@ everything else.
 [Fan control](#fan-control) ·
 [Alerts](#alerts) ·
 [Integrations](#integrations) ·
+[Diagnostics](#something-wrong-with-your-hardware) ·
 [Accounts and security](#accounts-and-security) ·
 [Backup](#backup) ·
 [Troubleshooting](#troubleshooting) ·
 [Upgrading](#upgrading) ·
-[Development](#development)
+[Development](#development) ·
+[Contributing](CONTRIBUTING.md)
 
 ## Supported hardware
 
@@ -349,7 +389,7 @@ Dashboards → New → Import, and pick your Prometheus data source.
    chart first, then the footer.
 4. **App tile**: `/healthz` answers `200` while every BMC answers and `503` as soon as one stops.
 
-<img alt="Embed widget" src="docs/embed.jpg" width="380">
+<img alt="Embed widget" src="docs/embed.jpg" width="420">
 
 ## Something wrong with your hardware?
 
