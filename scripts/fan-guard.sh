@@ -30,8 +30,10 @@ if [ -f "$ENV_FILE" ]; then
     echo "$(date '+%F %T') fan-guard: $ENV_FILE is writable by others; fix with chmod 600 $ENV_FILE" >&2
     exit 1
   fi
+  set -a
   # shellcheck source=/dev/null
-  set -a; . "$ENV_FILE"; set +a
+  . "$ENV_FILE"
+  set +a
 fi
 
 log() { echo "$(date '+%F %T') fan-guard: $*"; }
