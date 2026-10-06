@@ -45,14 +45,15 @@ a container stop. A watchdog restarts it if it stalls, and a small script on the
 
 ## At a glance
 
+<p align="center"><img alt="A server's page: live readings and the last hour" src="docs/server.jpg"></p>
+
 <table>
   <tr>
-    <td width="58%"><img alt="A server's page: live readings and three hours of history" src="docs/server.jpg"></td>
-    <td><img alt="The control panel: fan curve, failsafe, minimum speed and quiet hours" src="docs/control.jpg"></td>
-  </tr>
-  <tr>
-    <td><img alt="Alerts on Discord, ntfy, Gotify or any webhook, with a live preview" src="docs/alerts.jpg"></td>
-    <td align="center"><img alt="The server page on a phone" src="docs/phone.jpg" width="230">&nbsp;&nbsp;<img alt="The Homarr widget" src="docs/embed.jpg" width="300"></td>
+    <td valign="top" width="50%"><img alt="The control panel: the fan curve, failsafe, minimum speed and quiet hours" src="docs/control.jpg"></td>
+    <td valign="top" align="center">
+      <img alt="The server page on a phone" src="docs/phone.jpg" width="260"><br><br>
+      <img alt="The Homarr widget" src="docs/embed.jpg" width="340">
+    </td>
   </tr>
 </table>
 
@@ -334,6 +335,8 @@ Placeholders: `{server}` `{host}` `{model}` `{cpu}` `{speed}` `{mode}` `{reason}
 The **status report** is one card per server: CPU, fans and power now, minimum, average and maximum over
 the period, air temperatures, time under automatic control, trend lines and the latest events. By default
 the same message is edited each time, so the channel holds one live status card.
+
+<img alt="The alerts page: every event, its text, and a live preview" src="docs/alerts.jpg">
 
 <img alt="Discord status report" src="docs/discord-report.jpg" width="640">
 
